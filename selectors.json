@@ -2,6 +2,9 @@
   "chatContainer": {
     "strategies": [
       "#workbench\\.parts\\.auxiliarybar",
+      ".virtualized-composer-messages-scroll-container",
+      ".virtualized-composer-messages-layout",
+      ".composer-messages-container",
       "div.composer-bar.editor",
       "[class*='composer-bar']",
       "[class*='composer-panel']",

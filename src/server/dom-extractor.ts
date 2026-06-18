@@ -33,8 +33,8 @@ export {
  * Runs inside Cursor's renderer process via Runtime.evaluate.
  * Must be completely self-contained (no Node.js imports).
  *
- * Uses Cursor's data attributes (data-flat-index, data-message-role,
- * data-message-kind, data-tool-status) for reliable extraction.
+ * Uses Cursor's data attributes (data-flat-index or data-message-index,
+ * data-message-role, data-message-kind, data-tool-status) for reliable extraction.
  */
 export function extractionFunction(
   containerSelectors: string[],
@@ -112,17 +112,62 @@ export function extractionFunction(
     return parts.join(' > ');
   }
 
+  /** Legacy flat-index wrappers, or virtualized composer rows (Cursor 2026+). */
+  function discoverMessageWrappers(root: Element): Element[] {
+    const legacy = root.querySelectorAll('[data-flat-index]');
+    if (legacy.length > 0) return Array.from(legacy);
+
+    const virtualRows = root.querySelectorAll('.virtualized-composer-messages-row');
+    if (virtualRows.length > 0) {
+      const wrappers: Element[] = [];
+      for (const row of Array.from(virtualRows)) {
+        if (row.querySelector('[data-message-role]')) wrappers.push(row);
+      }
+      if (wrappers.length > 0) return wrappers;
+    }
+
+    const rendered = root.querySelectorAll('.composer-rendered-message[data-message-role]');
+    if (rendered.length > 0) return Array.from(rendered);
+
+    return [];
+  }
+
+  function resolveFlatIndex(wrapper: Element, msgEl: Element): number {
+    const flatAttr = wrapper.getAttribute('data-flat-index');
+    if (flatAttr != null && flatAttr !== '') {
+      const parsed = parseInt(flatAttr, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    const msgIndex = msgEl.getAttribute('data-message-index');
+    if (msgIndex != null && msgIndex !== '') {
+      const parsed = parseInt(msgIndex, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    const rowIndex = wrapper.getAttribute('data-index');
+    if (rowIndex != null && rowIndex !== '') {
+      const parsed = parseInt(rowIndex, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return 0;
+  }
+
+  function isTranscriptMessage(el: Element): boolean {
+    return !!el.closest(
+      '.composer-messages-container, [data-flat-index], .composer-human-ai-pair-container, .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+    );
+  }
+
   try {
     const container = findFirst(containerSelectors);
     if (!container) return null;
 
-    const flatIndexEls = container.querySelectorAll('[data-flat-index]');
+    const messageWrappers = discoverMessageWrappers(container);
     let containerComposerId =
       container.getAttribute('data-composer-id') ||
       container.closest('[data-composer-id]')?.getAttribute('data-composer-id') ||
       '';
-    if (!containerComposerId && flatIndexEls.length > 0) {
-      const firstMsg = flatIndexEls[0];
+    if (!containerComposerId && messageWrappers.length > 0) {
+      const firstMsg = messageWrappers[0];
       containerComposerId = firstMsg.closest('[data-composer-id]')?.getAttribute('data-composer-id') || '';
     }
 
@@ -936,10 +981,11 @@ export function extractionFunction(
       };
     }
 
-    for (const wrapper of Array.from(flatIndexEls)) {
-      const flatIndex = parseInt(wrapper.getAttribute('data-flat-index') || '0', 10);
-
-      const msgEl = wrapper.querySelector('[data-message-role]') || wrapper;
+    for (const wrapper of messageWrappers) {
+      const msgEl = wrapper.matches('[data-message-role]')
+        ? wrapper
+        : (wrapper.querySelector('[data-message-role]') || wrapper);
+      const flatIndex = resolveFlatIndex(wrapper, msgEl);
       const role = msgEl.getAttribute('data-message-role');
       const kind = msgEl.getAttribute('data-message-kind');
       const messageId = msgEl.getAttribute('data-message-id') || `fi-${flatIndex}`;
@@ -1130,6 +1176,26 @@ export function extractionFunction(
         continue;
       }
 
+      // --- AI thinking (virtualized composer exposes as its own message row) ---
+      if (role === 'ai' && kind === 'thinking') {
+        const thoughtCollapsible = wrapper.querySelector('.ui-thinking-collapsible');
+        if (thoughtCollapsible) {
+          const hdr = thoughtCollapsible.querySelector('.ui-collapsible-header');
+          const parsed = parseThoughtSpansFromHeader(hdr);
+          elements.push({
+            type: 'thought' as const,
+            id: messageId,
+            flatIndex,
+            duration: parsed.duration,
+            action: parsed.action || undefined,
+            detail: parsed.detail || undefined,
+            thoughtKind: 'thinking_step' as const,
+          });
+          rawEl.parsedAs = 'thinking';
+          continue;
+        }
+      }
+
       // --- AI assistant message ---
       if (role === 'ai' && kind === 'assistant') {
         const markdownRoot = wrapper.querySelector('.markdown-root');
@@ -1210,11 +1276,11 @@ export function extractionFunction(
       }
     }
 
-    // --- Orphan activity indicators (not inside any [data-flat-index]) ---
+    // --- Orphan activity indicators (not inside any transcript message) ---
     const _orphanIndicators: Array<{ cls: string; text: string; parentCls: string }> = [];
     const allIndicators = container.querySelectorAll('.loading-indicator-v3, .make-shine');
     for (const ind of Array.from(allIndicators)) {
-      if (ind.closest('[data-flat-index]')) continue;
+      if (isTranscriptMessage(ind)) continue;
       _orphanIndicators.push({
         cls: ind.className.substring(0, 200),
         text: (ind.textContent || '').trim().substring(0, 120),
@@ -1440,8 +1506,7 @@ export function extractionFunction(
     };
     const cleanTaskText = (raw: string): string =>
       raw.replace(/\s+/g, ' ').replace(/^\$\s*/, '').trim();
-    const isInTranscript = (el: Element): boolean =>
-      !!el.closest('.composer-messages-container, [data-flat-index], .composer-human-ai-pair-container');
+    const isInTranscript = isTranscriptMessage;
     const backgroundSummaryRe = /^(\d+)\s+background\s+(?:terminal|task)s?$/i;
     const hasSummaryChevron = (row: Element): boolean =>
       !!row.querySelector(
@@ -1524,7 +1589,8 @@ export function extractionFunction(
       const waitCount = parseInt(match[1], 10);
       if (!Number.isFinite(waitCount) || waitCount <= 0) continue;
 
-      const relatedShell = nudge.closest('[data-flat-index]')?.querySelector('.ui-shell-tool-call--with-stop')
+      const relatedShell = nudge.closest('[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message')
+        ?.querySelector('.ui-shell-tool-call--with-stop')
         ?? nudge.parentElement?.querySelector('.ui-shell-tool-call--with-stop');
       const stopEl = relatedShell?.querySelector('.ui-shell-tool-call__glass-stop');
 
@@ -1537,7 +1603,9 @@ export function extractionFunction(
     }
 
     // Transcript may surface active (non-finished) background summaries separately from the toolbar.
-    const transcriptRoot = container.querySelector('.composer-messages-container') ?? container;
+    const transcriptRoot = container.querySelector(
+      '.composer-messages-container, .virtualized-composer-messages-scroll-container, .virtualized-composer-messages-layout',
+    ) ?? container;
     collectBackgroundSummary(transcriptRoot, 'transcript');
 
     let maxSummaryCount = 0;
@@ -1571,7 +1639,7 @@ export function extractionFunction(
         stopBtn.parentElement;
       if (!card || seenBackgroundCards.has(card)) continue;
 
-      const inTranscript = !!stopBtn.closest('[data-flat-index]');
+      const inTranscript = isTranscriptMessage(stopBtn);
       const isStoppableShellCall =
         stopBtn.classList.contains('ui-shell-tool-call__glass-stop') ||
         !!stopBtn.closest('.ui-shell-tool-call--with-stop') ||
