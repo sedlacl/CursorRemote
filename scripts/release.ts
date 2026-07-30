@@ -5,6 +5,7 @@ import { updateVsixInstallDocs } from './update-vsix-install-docs.js';
 import { parseBaseSemver } from './version-utils.js';
 
 const PKG_PATH = resolve(process.cwd(), 'package.json');
+const LOCK_PATH = resolve(process.cwd(), 'package-lock.json');
 const CHANGELOG_PATH = resolve(process.cwd(), 'CHANGELOG.md');
 
 type BumpType = 'patch' | 'minor' | 'major';
@@ -41,6 +42,14 @@ function main(): void {
   writeFileSync(PKG_PATH, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
   console.log(`✓ Updated package.json`);
 
+  const lock = JSON.parse(readFileSync(LOCK_PATH, 'utf-8'));
+  lock.version = newVersion;
+  if (lock.packages?.['']) {
+    lock.packages[''].version = newVersion;
+  }
+  writeFileSync(LOCK_PATH, JSON.stringify(lock, null, 2) + '\n', 'utf-8');
+  console.log(`✓ Updated package-lock.json`);
+
   updateVsixInstallDocs(newVersion);
 
   const changelog = readFileSync(CHANGELOG_PATH, 'utf-8');
@@ -56,7 +65,7 @@ function main(): void {
   }
 
   execSync(
-    `git add package.json CHANGELOG.md README.md docs/setup-guide.md`,
+    `git add package.json package-lock.json CHANGELOG.md README.md docs/setup-guide.md`,
     { stdio: 'inherit' },
   );
   execSync(`git commit -m "release: v${newVersion}"`, { stdio: 'inherit' });
