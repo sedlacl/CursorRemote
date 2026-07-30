@@ -800,7 +800,7 @@ describe('web: debug panel', () => {
         pid: 123,
         port: 3002,
         host: '127.0.0.1',
-        dataDirName: 'cursor-remote.cursor-remote',
+        dataDirName: 'qjohn.cursor-remote',
         startedAt: Date.now(),
         clientBuild: 'vite-dev',
       },

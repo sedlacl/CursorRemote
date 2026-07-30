@@ -102,13 +102,22 @@ function main(): void {
   const innerPkgFile = files.find(f => f === 'extension/package.json');
   if (innerPkgFile) {
     const innerPkg = execSync(
-      `python3 -c "import zipfile,sys,json;print(json.loads(zipfile.ZipFile(sys.argv[1]).read('extension/package.json')).get('version',''))" ${JSON.stringify(vsixPath)}`,
+      `python3 -c "import zipfile,sys,json;p=json.loads(zipfile.ZipFile(sys.argv[1]).read('extension/package.json'));print(p.get('publisher',''));print(p.get('name',''));print(p.get('version',''))" ${JSON.stringify(vsixPath)}`,
       { encoding: 'utf-8' },
-    ).trim();
-    if (innerPkg === pkg.version) {
+    ).trim().split(/\r?\n/);
+    const [publisher, name, version] = innerPkg;
+    const expectedId = `${pkg.publisher}.${pkg.name}`;
+    const actualId = `${publisher}.${name}`;
+    if (actualId === expectedId) {
+      console.log(`\n✓ Extension ID match: ${actualId}`);
+    } else {
+      console.error(`\n✗ Extension ID mismatch: VSIX has ${actualId}, repo expects ${expectedId}`);
+      errors++;
+    }
+    if (version === pkg.version) {
       console.log(`\n✓ Version match: ${pkg.version}`);
     } else {
-      console.error(`\n✗ Version mismatch: VSIX has ${innerPkg}, repo has ${pkg.version}`);
+      console.error(`\n✗ Version mismatch: VSIX has ${version}, repo has ${pkg.version}`);
       errors++;
     }
   }

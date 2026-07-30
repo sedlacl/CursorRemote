@@ -1,10 +1,16 @@
 import type { ChatElement } from './types.js';
 
 export function compareMessageOrder(a: ChatElement, b: ChatElement): number {
-  if (a.historyIndex != null && b.historyIndex != null) {
-    const historyDelta = a.historyIndex - b.historyIndex;
+  const aHasHistoryIndex = a.historyIndex != null;
+  const bHasHistoryIndex = b.historyIndex != null;
+  if (aHasHistoryIndex && bHasHistoryIndex) {
+    const historyDelta = a.historyIndex! - b.historyIndex!;
     if (historyDelta !== 0) return historyDelta;
   }
+  // Never compare a global storage position with a DOM-local source index.
+  // Partial storage reads therefore stay before live-only rows until they
+  // receive their own historyIndex on a later merge.
+  if (aHasHistoryIndex !== bHasHistoryIndex) return aHasHistoryIndex ? -1 : 1;
   const aHasTurnOrder = a.turnIndex != null && a.turnOrder != null;
   const bHasTurnOrder = b.turnIndex != null && b.turnOrder != null;
   if (aHasTurnOrder && bHasTurnOrder) {

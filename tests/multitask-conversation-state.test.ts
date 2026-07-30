@@ -233,6 +233,55 @@ describe('Multitask and conversation state', () => {
     );
   });
 
+  it('uses unique wrapper ordinals when all numeric message attributes are absent', () => {
+    const state = extract(`
+      <div id="container" data-composer-id="composer-fallback">
+        <div class="virtualized-composer-messages-row">
+          <div data-message-role="human" data-message-kind="human">
+            <div class="aislash-editor-input-readonly">First</div>
+          </div>
+        </div>
+        <div class="virtualized-composer-messages-row">
+          <div data-message-role="human" data-message-kind="human">
+            <div class="aislash-editor-input-readonly">Second</div>
+          </div>
+        </div>
+      </div>
+    `);
+
+    assert.deepEqual(
+      state.messages.map(message => [message.id, message.flatIndex]),
+      [['fi-0', 0], ['fi-1', 1]],
+    );
+  });
+
+  it('does not compare a stored history position with a live source index', () => {
+    const live = extract(`
+      <div id="container" data-composer-id="composer-partial-history">
+        <div class="virtualized-composer-messages-row" data-index="1" data-pair-index="1">
+          <div data-message-role="human" data-message-kind="human" data-message-id="stored">
+            <div class="aislash-editor-input-readonly">Stored first</div>
+          </div>
+        </div>
+        <div class="virtualized-composer-messages-row" data-index="2" data-pair-index="2">
+          <div data-message-role="human" data-message-kind="human" data-message-id="live">
+            <div class="aislash-editor-input-readonly">Live second</div>
+          </div>
+        </div>
+      </div>
+    `);
+    const manager = new StateManager(0);
+    manager.onExtraction(live);
+    const stored = { ...live.messages[0]!, flatIndex: 400, historyIndex: 400 };
+
+    manager.mergeStoredHistory([stored]);
+
+    assert.deepEqual(
+      manager.getCurrentState().messages.map(message => message.id),
+      ['stored', 'live'],
+    );
+  });
+
   it('extracts confirmed activity-group Thought and Explored rows without duplicated detail', () => {
     const state = extract(`
       <div id="container" data-composer-id="composer-1">

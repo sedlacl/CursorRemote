@@ -51,6 +51,8 @@ cursor --install-extension cursor-remote-0.2.0.vsix
 
 Or in Cursor: Command Palette (`Ctrl+Shift+P`) > **Extensions: Install from VSIX...** > select the file.
 
+> **Extension ID changed:** CursorRemote is now `qjohn.cursor-remote`. Existing `cursor-remote.cursor-remote` installations do not update automatically; uninstall the old extension, then install the new one.
+
 ### License Key
 
 Open the **CursorRemote** panel in the activity bar (left sidebar). Click "License Key Required" to enter your key. It's stored securely in the OS credential store.

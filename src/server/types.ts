@@ -33,9 +33,9 @@ export interface RawSignals {
   shimmer: Array<{ text: string; inToolCall: boolean; inHeader: boolean }>;
   loadingIndicator: boolean;
   statusEl?: { text: string; classes: string };
-  /** Per-element DOM inventory — raw attributes and indicator classes for every [data-flat-index]. */
+  /** Per-element DOM inventory — raw attributes and indicator classes for each discovered transcript wrapper. */
   elements: RawElement[];
-  /** Activity-related elements NOT inside any [data-flat-index] wrapper. */
+  /** Activity-related elements NOT inside any discovered transcript wrapper. */
   orphanIndicators: Array<{ cls: string; text: string; parentCls: string }>;
 }
 
@@ -296,6 +296,7 @@ export type ChatElement =
   | LoadingIndicator;
 
 export interface TranscriptOrder {
+  /** Legacy wire-format source index; never a global ordering key. */
   flatIndex: number;
   /** Authoritative global header position loaded from Cursor storage. */
   historyIndex?: number;

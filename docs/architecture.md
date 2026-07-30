@@ -91,7 +91,7 @@ Cursor IDE  ←──CDP──→  Relay Server  ←──socket.io──→  Ph
 
 **How it works**:
 1. The extraction function is passed as a serialized function via `client.callFunction()`
-2. Inside Cursor's renderer, it selects all `[data-flat-index]` elements
+2. Inside Cursor's renderer, it selects virtual transcript rows, with `[data-flat-index]` as a legacy fallback
 3. For each element, reads `data-message-role` + `data-message-kind` to classify
 4. Extracts type-specific content into typed `ChatElement` objects
 5. **Assistant messages**: `html` is **`.markdown-root` innerHTML only** (prose). **`codeBlocks`** is an array of **`CodeBlockItem`** structs built from composer code widgets (Shiki lines, Monaco `.view-line` text, line-aware plain-code fallback, diff decorations → `diffLines` with `add`/`rem`/`ctx`/…).
@@ -120,7 +120,7 @@ Within the `ai`/`tool` branch, classification priority:
 
 | Target                  | Selector / Attribute                                    |
 | ----------------------- | ------------------------------------------------------- |
-| Message wrappers        | `[data-flat-index]`                                     |
+| Message wrappers        | `.virtualized-composer-messages-row`; legacy `[data-flat-index]` |
 | Human text              | `.aislash-editor-input-readonly`                        |
 | Mentions                | `.mention[data-mention-name]`                           |
 | AI markdown content     | `.markdown-root` innerHTML → assistant `html` (prose only) |

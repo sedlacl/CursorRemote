@@ -24,7 +24,9 @@ const CHAT_SCROLL_HELPERS_JS = `
         const rect = el.getBoundingClientRect();
         return {
           el,
-          flatCount: el.querySelectorAll('[data-flat-index]').length,
+          messageCount: el.querySelectorAll(
+            '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+          ).length,
           scrollHeight: el.scrollHeight,
           clientHeight: el.clientHeight,
           visibleArea: Math.max(0, rect.width) * Math.max(0, rect.height),
@@ -33,11 +35,11 @@ const CHAT_SCROLL_HELPERS_JS = `
       })
       .filter(x => x.clientHeight > 80 && x.visibleArea > 0)
       .sort((a, b) =>
-        (b.flatCount - a.flatCount) ||
+        (b.messageCount - a.messageCount) ||
         (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight)
       );
 
-    const picked = candidates.find(x => x.flatCount > 0) || candidates[0];
+    const picked = candidates.find(x => x.messageCount > 0) || candidates[0];
     return picked?.el || null;
   }
 `;
@@ -327,15 +329,19 @@ export class CommandExecutor {
             const target = findChatScrollTarget(${JSON.stringify(containerSelectors)});
             if (!target) return { ok: false, error: 'Chat scroll target not found' };
             const r = target.getBoundingClientRect();
-            const flats = target.querySelectorAll('[data-flat-index]');
+            const messages = target.querySelectorAll(
+              '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+            );
             return {
               ok: true,
               x: Math.max(1, r.left + r.width / 2),
               y: Math.max(1, r.top + Math.min(r.height / 2, 320)),
               before: target.scrollTop,
-              firstFlat: flats[0]?.getAttribute('data-flat-index') || '',
-              lastFlat: flats[flats.length - 1]?.getAttribute('data-flat-index') || '',
-              flatCount: flats.length,
+              firstMessage: messages[0]?.getAttribute('data-message-index')
+                || messages[0]?.getAttribute('data-index') || '',
+              lastMessage: messages[messages.length - 1]?.getAttribute('data-message-index')
+                || messages[messages.length - 1]?.getAttribute('data-index') || '',
+              messageCount: messages.length,
               scrollHeight: target.scrollHeight,
               clientHeight: target.clientHeight,
             };
@@ -346,9 +352,9 @@ export class CommandExecutor {
           x?: number;
           y?: number;
           before?: number;
-          firstFlat?: string;
-          lastFlat?: string;
-          flatCount?: number;
+          firstMessage?: string;
+          lastMessage?: string;
+          messageCount?: number;
           scrollHeight?: number;
           clientHeight?: number;
         } | null;
@@ -377,13 +383,17 @@ export class CommandExecutor {
               target.scrollTop = Math.max(0, target.scrollTop - target.clientHeight * 1.5);
               target.dispatchEvent(new Event('scroll', { bubbles: true }));
             }
-            const flats = target.querySelectorAll('[data-flat-index]');
+            const messages = target.querySelectorAll(
+              '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+            );
             return {
               ok: true,
               after: target.scrollTop,
-              firstFlat: flats[0]?.getAttribute('data-flat-index') || '',
-              lastFlat: flats[flats.length - 1]?.getAttribute('data-flat-index') || '',
-              flatCount: flats.length,
+              firstMessage: messages[0]?.getAttribute('data-message-index')
+                || messages[0]?.getAttribute('data-index') || '',
+              lastMessage: messages[messages.length - 1]?.getAttribute('data-message-index')
+                || messages[messages.length - 1]?.getAttribute('data-index') || '',
+              messageCount: messages.length,
               scrollHeight: target.scrollHeight,
               clientHeight: target.clientHeight,
             };
@@ -392,9 +402,9 @@ export class CommandExecutor {
           ok: boolean;
           error?: string;
           after?: number;
-          firstFlat?: string;
-          lastFlat?: string;
-          flatCount?: number;
+          firstMessage?: string;
+          lastMessage?: string;
+          messageCount?: number;
           scrollHeight?: number;
           clientHeight?: number;
         } | null;
@@ -402,8 +412,8 @@ export class CommandExecutor {
         console.log(
           `[command-executor] Chat scroll up ${i + 1}/${times}: ` +
           `top ${Math.round(before.before ?? 0)} -> ${Math.round(result.after ?? 0)}, ` +
-          `flat=${result.flatCount ?? 0}, first=${before.firstFlat || '?'}->${result.firstFlat || '?'}, ` +
-          `last=${before.lastFlat || '?'}->${result.lastFlat || '?'}, ` +
+          `messages=${result.messageCount ?? 0}, first=${before.firstMessage || '?'}->${result.firstMessage || '?'}, ` +
+          `last=${before.lastMessage || '?'}->${result.lastMessage || '?'}, ` +
           `h=${result.clientHeight ?? 0}/${result.scrollHeight ?? 0}`
         );
         await sleep(450);
@@ -427,7 +437,9 @@ export class CommandExecutor {
             ok: true,
             before,
             after: target.scrollTop,
-            flatCount: target.querySelectorAll('[data-flat-index]').length,
+            messageCount: target.querySelectorAll(
+              '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+            ).length,
             scrollHeight: target.scrollHeight,
             clientHeight: target.clientHeight,
           };
@@ -437,7 +449,7 @@ export class CommandExecutor {
         error?: string;
         before?: number;
         after?: number;
-        flatCount?: number;
+        messageCount?: number;
         scrollHeight?: number;
         clientHeight?: number;
       } | null;
@@ -445,7 +457,7 @@ export class CommandExecutor {
       console.log(
         `[command-executor] Scrolled chat to bottom: ` +
         `top ${Math.round(result.before ?? 0)} -> ${Math.round(result.after ?? 0)}, ` +
-        `flat=${result.flatCount ?? 0}, h=${result.clientHeight ?? 0}/${result.scrollHeight ?? 0}`
+        `messages=${result.messageCount ?? 0}, h=${result.clientHeight ?? 0}/${result.scrollHeight ?? 0}`
       );
     });
   }
@@ -763,10 +775,15 @@ export class CommandExecutor {
     const result = await this.client.evaluate(`
       (() => {
         const tcId = ${JSON.stringify(toolCallId)};
-        const wrapper = document.querySelector('[data-tool-call-id="' + tcId + '"]')
-          || document.querySelector('[data-tool-call-id="' + tcId + '"]')?.closest('[data-flat-index]')
+        const tool = document.querySelector('[data-tool-call-id="' + tcId + '"]');
+        const wrapper = tool?.closest(
+          '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+        )
+          || tool
           || (() => {
-            for (const el of document.querySelectorAll('[data-flat-index]')) {
+            for (const el of document.querySelectorAll(
+              '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+            )) {
               const inner = el.querySelector('[data-tool-call-id="' + tcId + '"]');
               if (inner) return el;
             }
@@ -827,9 +844,15 @@ export class CommandExecutor {
       const expanded = await this.client.evaluate(`
         (() => {
           const tcId = ${JSON.stringify(toolCallId)};
-          const wrapper = document.querySelector('[data-tool-call-id="' + tcId + '"]')
+          const tool = document.querySelector('[data-tool-call-id="' + tcId + '"]');
+          const wrapper = tool?.closest(
+            '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+          )
+            || tool
             || (() => {
-              for (const el of document.querySelectorAll('[data-flat-index]')) {
+              for (const el of document.querySelectorAll(
+                '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+              )) {
                 const inner = el.querySelector('[data-tool-call-id="' + tcId + '"]');
                 if (inner) return el;
               }
@@ -869,9 +892,15 @@ export class CommandExecutor {
       await this.client.evaluate(`
         (() => {
           const tcId = ${JSON.stringify(toolCallId)};
-          const wrapper = document.querySelector('[data-tool-call-id="' + tcId + '"]')
+          const tool = document.querySelector('[data-tool-call-id="' + tcId + '"]');
+          const wrapper = tool?.closest(
+            '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+          )
+            || tool
             || (() => {
-              for (const el of document.querySelectorAll('[data-flat-index]')) {
+              for (const el of document.querySelectorAll(
+                '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+              )) {
                 const inner = el.querySelector('[data-tool-call-id="' + tcId + '"]');
                 if (inner) return el;
               }

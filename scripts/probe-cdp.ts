@@ -58,7 +58,7 @@ async function main() {
     // All .make-shine elements
     const shineEls = container.querySelectorAll('.make-shine');
     for (const el of Array.from(shineEls)) {
-      const wrapper = el.closest('[data-flat-index]');
+      const wrapper = el.closest('[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]');
       const toolCall = el.closest('[data-tool-call-id]');
       const header = el.closest('.ui-collapsible-header');
       const loadingInd = el.closest('.loading-indicator-v3') || wrapper?.querySelector('.loading-indicator-v3');
@@ -66,7 +66,7 @@ async function main() {
         type: 'make-shine',
         text: (el.textContent || '').trim().substring(0, 200),
         parentText: (el.parentElement?.textContent || '').trim().substring(0, 200),
-        wrapperFlatIndex: wrapper?.getAttribute('data-flat-index'),
+        wrapperSourceIndex: wrapper?.getAttribute('data-flat-index') || wrapper?.getAttribute('data-message-index') || wrapper?.getAttribute('data-index'),
         insideToolCall: !!toolCall,
         toolCallId: toolCall?.getAttribute('data-tool-call-id'),
         insideHeader: !!header,
@@ -79,12 +79,12 @@ async function main() {
     // Loading indicators
     const loadingEls = container.querySelectorAll('.loading-indicator-v3');
     for (const el of Array.from(loadingEls)) {
-      const wrapper = el.closest('[data-flat-index]');
+      const wrapper = el.closest('[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]');
       out.push({
         type: 'loading-indicator',
         text: (el.textContent || '').trim().substring(0, 200),
         wrapperText: (wrapper?.textContent || '').trim().substring(0, 200),
-        wrapperFlatIndex: wrapper?.getAttribute('data-flat-index'),
+        wrapperSourceIndex: wrapper?.getAttribute('data-flat-index') || wrapper?.getAttribute('data-message-index') || wrapper?.getAttribute('data-index'),
         classes: el.className,
         wrapperClasses: wrapper?.className || '',
       });
@@ -94,12 +94,12 @@ async function main() {
     const thinkingCollapsibles = container.querySelectorAll('.ui-collapsible.ui-thinking-collapsible');
     for (const tc of Array.from(thinkingCollapsibles).slice(0, 15)) {
       const hdr = tc.querySelector('.ui-collapsible-header');
-      const wrapper = tc.closest('[data-flat-index]');
+      const wrapper = tc.closest('[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]');
       out.push({
         type: 'ui-thinking-collapsible',
         headerText: (hdr?.textContent || '').replace(/\s+/g, ' ').trim().substring(0, 200),
         hasMakeShine: !!tc.querySelector('.make-shine') || !!hdr?.querySelector('.make-shine'),
-        wrapperFlatIndex: wrapper?.getAttribute('data-flat-index'),
+        wrapperSourceIndex: wrapper?.getAttribute('data-flat-index') || wrapper?.getAttribute('data-message-index') || wrapper?.getAttribute('data-index'),
         dataOpen: tc.getAttribute('data-open'),
         dataExpandable: tc.getAttribute('data-expandable'),
       });
@@ -110,7 +110,7 @@ async function main() {
     for (const sg of Array.from(stepGroups)) {
       const header = sg.querySelector('.ui-collapsible-header');
       if (!header) continue;
-      const wrapper = sg.closest('[data-flat-index]');
+      const wrapper = sg.closest('[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]');
       const allChildren = header.querySelectorAll('*');
       const animatedClasses: string[] = [];
       for (const child of Array.from(allChildren)) {
@@ -125,7 +125,7 @@ async function main() {
         type: 'step-group-header',
         text: (header.textContent || '').trim().substring(0, 200),
         headerClasses: hEl.className,
-        wrapperFlatIndex: wrapper?.getAttribute('data-flat-index'),
+        wrapperSourceIndex: wrapper?.getAttribute('data-flat-index') || wrapper?.getAttribute('data-message-index') || wrapper?.getAttribute('data-index'),
         childClasses: animatedClasses.slice(0, 20),
         animation: computed.animation || computed.getPropertyValue('animation'),
         transition: computed.transition,
@@ -134,18 +134,22 @@ async function main() {
       });
     }
 
-    // Last [data-flat-index] element — often the most interesting (tail of chat)
-    const allFlatIdx = container.querySelectorAll('[data-flat-index]');
-    if (allFlatIdx.length > 0) {
-      const lastWrapper = allFlatIdx[allFlatIdx.length - 1] as HTMLElement;
-      const fi = lastWrapper.getAttribute('data-flat-index');
+    // Last transcript wrapper — often the most interesting (tail of chat)
+    const allWrappers = container.querySelectorAll(
+      '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+    );
+    if (allWrappers.length > 0) {
+      const lastWrapper = allWrappers[allWrappers.length - 1] as HTMLElement;
+      const sourceIndex = lastWrapper.getAttribute('data-flat-index')
+        || lastWrapper.getAttribute('data-message-index')
+        || lastWrapper.getAttribute('data-index');
       const role = lastWrapper.getAttribute('data-tab0-role');
       const kind = lastWrapper.getAttribute('data-tab0-kind');
       const stepGroup = lastWrapper.querySelector('.ui-collapsible.ui-step-group-collapsible');
       const stepHeader = stepGroup?.querySelector('.ui-collapsible-header') as HTMLElement | null;
       out.push({
-        type: 'last-flat-index',
-        flatIndex: fi,
+        type: 'last-transcript-wrapper',
+        sourceIndex,
         role, kind,
         hasStepGroup: !!stepGroup,
         headerText: stepHeader?.textContent?.trim().substring(0, 200) || null,
@@ -165,13 +169,13 @@ async function main() {
       try {
         const els = container.querySelectorAll(sel);
         for (const el of Array.from(els).slice(0, 5)) {
-          const wrapper = el.closest('[data-flat-index]');
+          const wrapper = el.closest('[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]');
           out.push({
             type: 'shimmer-pattern',
             selector: sel,
             text: (el.textContent || '').trim().substring(0, 100),
             classes: el.className.substring(0, 200),
-            wrapperFlatIndex: wrapper?.getAttribute('data-flat-index'),
+            wrapperSourceIndex: wrapper?.getAttribute('data-flat-index') || wrapper?.getAttribute('data-message-index') || wrapper?.getAttribute('data-index'),
             tag: el.tagName,
           });
         }

@@ -1,0 +1,78 @@
+name: Release extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish_open_vsx:
+        description: Publish the packaged VSIX to Open VSX
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and release VSIX
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+      VSIX_PATH: temp/cursor-remote.vsix
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check tag matches package version
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          tag_version="${TAG#v}"
+          if [ "$package_version" != "$tag_version" ]; then
+            echo "::error::Tag $TAG requires package.json version $tag_version, but found $package_version."
+            exit 1
+          fi
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build project and extension
+        run: |
+          npm run build
+          npm run build:ext
+
+      - name: Package public VSIX without version bump
+        run: |
+          mkdir -p temp
+          cp package.json temp/package.json.before-public-package
+          trap 'mv temp/package.json.before-public-package package.json' EXIT
+          node -e "const fs = require('fs'); const pkg = require('./package.json'); pkg.publisher = 'qjohn'; pkg.displayName = 'CursorRemote'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
+          npx @vscode/vsce package --no-dependencies --out "$VSIX_PATH"
+          npx tsx scripts/verify-vsix.ts "$VSIX_PATH"
+
+      - name: Create GitHub Release and attach VSIX
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$VSIX_PATH" --clobber
+          else
+            gh release create "$TAG" "$VSIX_PATH" --title "$TAG" --generate-notes
+          fi
+
+      - name: Publish to Open VSX
+        if: ${{ secrets.OVSX_PAT != '' && (github.event_name != 'workflow_dispatch' || inputs.publish_open_vsx) }}
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx ovsx publish "$VSIX_PATH" -p "$OVSX_PAT"

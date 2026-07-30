@@ -67,6 +67,8 @@ cursor --install-extension cursor-remote-0.2.0.vsix
 
 Or in Cursor: open the Command Palette (`Ctrl+Shift+P`), run **Extensions: Install from VSIX...**, and select the file.
 
+> **Extension ID changed:** CursorRemote is now `qjohn.cursor-remote`. Existing `cursor-remote.cursor-remote` installations do not update automatically; uninstall the old extension, then install the new one.
+
 ### 2. Enter Your License Key
 
 Open the **CursorRemote** panel in the activity bar (left sidebar). You'll see a "License Key Required" prompt — click it to enter your key. It's stored securely in the OS credential store via VS Code's Secrets API.

@@ -77,7 +77,7 @@ export class SetupPanel {
         break;
       }
       case 'copySettingsFilter': {
-        vscode.env.clipboard.writeText('@ext:cursor-remote.cursor-remote');
+        vscode.env.clipboard.writeText('@ext:qjohn.cursor-remote');
         vscode.window.showInformationMessage('Filter copied — paste it in the Settings search bar.');
         break;
       }
@@ -533,7 +533,7 @@ function getWebviewContent(state: PanelState): string {
   </div>
 
   <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border);">
-    <p class="info-text">For all settings, press <strong>Ctrl+,</strong> (or <strong>Cmd+,</strong>) and search <code>@ext:cursor-remote.cursor-remote</code>.
+    <p class="info-text">For all settings, press <strong>Ctrl+,</strong> (or <strong>Cmd+,</strong>) and search <code>@ext:qjohn.cursor-remote</code>.
     <button class="secondary" style="margin-left: 8px; display: inline; padding: 3px 10px; font-size: 0.9em;" id="copySettingsFilter">Copy filter</button></p>
   </div>
 

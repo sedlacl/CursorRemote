@@ -11,7 +11,7 @@ interface Snapshot {
 }
 
 interface WrapperInfo {
-  flatIndex: number;
+  sourceIndex: number;
   hasLoading: boolean;
   hasStepGroup: boolean;
   hasThinkingCollapsible: boolean;
@@ -64,7 +64,9 @@ async function main(): Promise<void> {
       const result = await client.evaluate(`
         (() => {
           const out = [];
-          const wrappers = document.querySelectorAll('[data-flat-index]');
+          const wrappers = document.querySelectorAll(
+            '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+          );
           for (const w of wrappers) {
             const hasLoading = !!w.querySelector('.loading-indicator-v3');
             const hasStepGroup = !!w.querySelector('.ui-collapsible.ui-step-group-collapsible');
@@ -79,7 +81,13 @@ async function main(): Promise<void> {
             const preview = w.querySelector('.ui-step-group-preview');
 
             out.push({
-              flatIndex: parseInt(w.getAttribute('data-flat-index') || '0', 10),
+              sourceIndex: parseInt(
+                w.getAttribute('data-flat-index')
+                  || w.getAttribute('data-message-index')
+                  || w.getAttribute('data-index')
+                  || String(out.length),
+                10,
+              ),
               hasLoading,
               hasStepGroup,
               hasThinkingCollapsible: hasThinking,
@@ -107,7 +115,7 @@ async function main(): Promise<void> {
             w.hasGroupLoading ? 'GROUP_LOADING' : '',
             w.hasShimmer ? 'SHIMMER' : '',
           ].filter(Boolean).join('+');
-          console.log(`  [${captures}] fi=${w.flatIndex} ${flags} header="${w.headerText.substring(0, 80)}"`);
+          console.log(`  [${captures}] source=${w.sourceIndex} ${flags} header="${w.headerText.substring(0, 80)}"`);
         }
       }
     } catch (err) {

@@ -159,7 +159,7 @@ export function extractionFunction(
     return [];
   }
 
-  function resolveFlatIndex(wrapper: Element, msgEl: Element): number {
+  function resolveFlatIndex(wrapper: Element, msgEl: Element, wrapperIndex: number): number {
     const flatAttr = wrapper.getAttribute('data-flat-index');
     if (flatAttr != null && flatAttr !== '') {
       const parsed = parseInt(flatAttr, 10);
@@ -175,7 +175,10 @@ export function extractionFunction(
       const parsed = parseInt(rowIndex, 10);
       if (Number.isFinite(parsed)) return parsed;
     }
-    return 0;
+    // The value is retained for the wire format, but is never a cross-snapshot
+    // order key. An ordinal keeps fallback IDs unique when a new Cursor build
+    // temporarily omits every known numeric attribute.
+    return wrapperIndex;
   }
 
   function resolveTranscriptOrder(
@@ -1055,11 +1058,11 @@ export function extractionFunction(
       };
     }
 
-    for (const wrapper of messageWrappers) {
+    for (const [wrapperIndex, wrapper] of messageWrappers.entries()) {
       const msgEl = wrapper.matches('[data-message-role]')
         ? wrapper
         : (wrapper.querySelector('[data-message-role]') || wrapper);
-      const flatIndex = resolveFlatIndex(wrapper, msgEl);
+      const flatIndex = resolveFlatIndex(wrapper, msgEl, wrapperIndex);
       const role = msgEl.getAttribute('data-message-role');
       const kind = msgEl.getAttribute('data-message-kind');
       const transcriptRow = wrapper.querySelector('[data-react-transcript-row-kind]');
@@ -2574,7 +2577,9 @@ export function extractionFunction(
                  sh.closest('.composer-terminal-top-header-text')) {
         text = (sh.textContent || '').trim();
       } else {
-        const descEl = (sh.closest('[data-flat-index]') || sh.parentElement)
+        const descEl = (sh.closest(
+          '[data-flat-index], .virtualized-composer-messages-row, .composer-rendered-message[data-message-role]',
+        ) || sh.parentElement)
           ?.querySelector('.composer-terminal-top-header-description, .ui-tool-call-line-action, .ui-edit-tool-call__filename');
         text = descEl ? (descEl.textContent || '').trim() : (sh.textContent || '').trim();
       }

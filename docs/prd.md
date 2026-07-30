@@ -167,7 +167,7 @@ Currently two transports are implemented:
 ### 3.1 Data Flow — Observation
 
 1. The relay server polls Cursor's DOM every 500ms via `Runtime.evaluate` (CDP)
-2. The extraction function runs inside Cursor's renderer, walking `[data-flat-index]` elements
+2. The extraction function runs inside Cursor's renderer, walking virtual transcript rows (with legacy `[data-flat-index]` support)
 3. It returns a structured `CursorState` object (typed `ChatElement[]`, approvals, tabs, mode, model)
 4. The State Manager diffs against the previous state
 5. Only changed fields are broadcast to connected clients via socket.io `state:patch`
@@ -263,7 +263,7 @@ chronological.
 | Field         | Type     | Description                                            |
 | ------------- | -------- | ------------------------------------------------------ |
 | `id`          | `string` | Message UUID                                           |
-| `flatIndex`   | `number` | Sequential position                                   |
+| `flatIndex`   | `number` | Source index compatibility field (not a sort key)     |
 | `toolCallId`  | `string` | Cursor's tool call ID                                  |
 | `status`      | `string` | `'loading'` or `'completed'`                           |
 | `action`      | `string` | Tool action name (Read, Edit, Shell) or status summary |
@@ -279,7 +279,7 @@ chronological.
 | Field       | Type     | Description                   |
 | ----------- | -------- | ----------------------------- |
 | `id`        | `string` | Generated ID                  |
-| `flatIndex` | `number` | Sequential position           |
+| `flatIndex` | `number` | Source index compatibility field |
 | `duration`  | `string` | e.g. "4s"                     |
 | `action`    | `string?` | Stable activity header, e.g. `Thought` or `Explored` |
 | `detail`    | `string?` | Expanded stable summary, e.g. a filename or `briefly` |
@@ -301,7 +301,7 @@ Represents both the legacy plan execution summary (`.plan-execution-message-cont
 | Field            | Type           | Description                                              |
 | ---------------- | -------------- | -------------------------------------------------------- |
 | `id`             | `string`       | Message UUID                                             |
-| `flatIndex`      | `number`       | Sequential position                                      |
+| `flatIndex`      | `number`       | Source index compatibility field (not a sort key)        |
 | `label`          | `string`       | Plan filename or label badge (e.g. "Build")              |
 | `title`          | `string`       | Plan title (e.g. "Telegram Integration Module")          |
 | `todosCompleted` | `number`       | Number of completed todos                                |
@@ -333,7 +333,7 @@ A terminal command that the agent wants to execute, shown as an interactive card
 | Field         | Type           | Description                                              |
 | ------------- | -------------- | -------------------------------------------------------- |
 | `id`          | `string`       | Message UUID                                             |
-| `flatIndex`   | `number`       | Sequential position                                      |
+| `flatIndex`   | `number`       | Source index compatibility field (not a sort key)        |
 | `toolCallId`  | `string`       | Cursor's tool call ID                                    |
 | `description` | `string`       | Header text (e.g. "Run outside sandbox:")                |
 | `candidates`  | `string`       | Command name summary (e.g. "cd, source, npx, python3")  |
@@ -353,7 +353,7 @@ A terminal command that the agent wants to execute, shown as an interactive card
 | Field       | Type     | Description                   |
 | ----------- | -------- | ----------------------------- |
 | `id`        | `string` | Generated ID                  |
-| `flatIndex` | `number` | Sequential position           |
+| `flatIndex` | `number` | Source index compatibility field |
 
 ### 4.4 ChatTab
 
@@ -601,7 +601,9 @@ Cursor is an Electron app based on VS Code. Its DOM uses generated class names t
 
 Cursor's chat DOM uses reliable `data-*` attributes for structured identification:
 
-- `data-flat-index="N"` — sequential index on each message wrapper
+- `data-message-index="N"` — message-local source index on rendered messages
+- `data-pair-index` + row `data-index` — local chronological order for virtual transcript rows
+- `data-flat-index="N"` — legacy wrapper index, retained only for older Cursor builds
 - `data-message-role="human|ai"` — message author
 - `data-message-kind="human|assistant|tool"` — message type
 - `data-message-id="UUID"` — stable message identifier
@@ -609,7 +611,9 @@ Cursor's chat DOM uses reliable `data-*` attributes for structured identificatio
 - `data-tool-status="loading|completed"` — tool execution status
 - `data-compact="true"` — collapsed tool summary
 
-The extraction function selects all `[data-flat-index]` elements inside the chat container, then uses the `data-message-role` + `data-message-kind` attributes to classify each element and extract type-specific content:
+The extraction function first selects `.virtualized-composer-messages-row` rows, then legacy
+`[data-flat-index]` wrappers, and finally rendered role-bearing messages. It uses
+`data-message-role` + `data-message-kind` to classify each element and extract type-specific content:
 
 | Type        | DOM Indicators                                        | Content Extracted                                     |
 | ----------- | ----------------------------------------------------- | ----------------------------------------------------- |
@@ -712,9 +716,13 @@ All configuration is via environment variables with sensible defaults:
 
 ### 10.3 Data-Attribute Extraction vs. Class-Based Selectors
 
-**Decision**: Use `data-flat-index`, `data-message-role`, `data-message-kind` for message extraction.
+**Decision**: Use virtual transcript rows plus `data-message-index`, `data-message-role`, and
+`data-message-kind` for message extraction; retain `data-flat-index` solely as a legacy fallback.
 
-**Rationale**: Class names are generated and change between Cursor versions. Data attributes are semantic and stable — they represent Cursor's internal data model.
+**Rationale**: Class names are generated and change between Cursor versions. The currently
+observed virtual-row structure and data attributes are semantic enough to identify messages;
+`data-flat-index` is not assumed to exist. Global history order comes from storage
+`historyIndex`, while `(data-pair-index, data-index)` orders the currently rendered DOM rows.
 
 ---
 

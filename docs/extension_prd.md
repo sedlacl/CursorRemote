@@ -199,7 +199,7 @@ Interactive configuration wizard opened via `cursorRemote.openSetup`. Created in
 - **Step 4: Sync** — instructions to send `/sync`
 
 ### Footer
-- **Open All Settings** button — disposes the webview panel first, then opens VS Code Settings filtered to `@ext:cursor-remote.cursor-remote` on a deferred tick (avoids Cursor renderer freeze from retained webview + settings editor conflict)
+- **Open All Settings** button — disposes the webview panel first, then opens VS Code Settings filtered to `@ext:qjohn.cursor-remote` on a deferred tick (avoids Cursor renderer freeze from retained webview + settings editor conflict)
 
 ---
 
