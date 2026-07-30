@@ -9,12 +9,15 @@ const REQUIRED_FILES = [
   'extension/dist/extension.cjs',
   'extension/dist/server/bundle.mjs',
   'extension/dist/client/index.html',
-  'extension/dist/client/app.js',
-  'extension/dist/client/styles.css',
-  'extension/dist/client/vendor-socket.io.min.js',
   'extension/package.json',
   'extension/selectors.json',
   'extension/media/icon.png',
+];
+
+/** Vite emits content-hashed bundles, so the client assets can only be matched by shape. */
+const REQUIRED_PATTERNS: Array<{ label: string; re: RegExp }> = [
+  { label: 'dist/client/assets/*.js', re: /^extension\/dist\/client\/assets\/.+\.js$/ },
+  { label: 'dist/client/assets/*.css', re: /^extension\/dist\/client\/assets\/.+\.css$/ },
 ];
 
 const FORBIDDEN_PATTERNS = [
@@ -63,6 +66,15 @@ with zipfile.ZipFile(sys.argv[1]) as z:
       console.log(`  ✓ ${required}`);
     } else {
       console.error(`  ✗ MISSING: ${required}`);
+      errors++;
+    }
+  }
+
+  for (const { label, re } of REQUIRED_PATTERNS) {
+    if (files.some(f => re.test(f))) {
+      console.log(`  ✓ ${label}`);
+    } else {
+      console.error(`  ✗ MISSING: ${label}`);
       errors++;
     }
   }

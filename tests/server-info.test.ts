@@ -14,7 +14,7 @@ async function importFreshServerInfo() {
   return import(`${moduleUrl}?t=${Date.now()}-${Math.random()}`);
 }
 
-test('SERVER_INSTANCE.version appends git build id for local workspace package', async () => {
+test('SERVER_INSTANCE.version appends git build id only for -local workspace packages', async () => {
   const pkg = JSON.parse(readFileSync(resolve('package.json'), 'utf-8')) as { version: string };
   const previousPackageRoot = process.env.PACKAGE_ROOT;
   process.env.PACKAGE_ROOT = resolve('.');
@@ -25,10 +25,15 @@ test('SERVER_INSTANCE.version appends git build id for local workspace package',
 
   try {
     const serverInfo = await importFreshServerInfo();
-    assert.match(
-      serverInfo.SERVER_INSTANCE.version,
-      new RegExp(`^${baseVersion(pkg.version)}\\+[0-9a-f]+(?:\\.dirty)?$`),
-    );
+    if (pkg.version.includes('-local')) {
+      assert.match(
+        serverInfo.SERVER_INSTANCE.version,
+        new RegExp(`^${baseVersion(pkg.version)}\\+[0-9a-f]+(?:\\.dirty)?$`),
+      );
+    } else {
+      // Release versions ship as-is so the VSIX and the reported version stay identical.
+      assert.equal(serverInfo.SERVER_INSTANCE.version, pkg.version);
+    }
   } finally {
     if (previousPackageRoot === undefined) {
       delete process.env.PACKAGE_ROOT;
