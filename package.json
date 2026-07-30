@@ -240,6 +240,7 @@
     "cursor-install": "tsx scripts/cursor-install.ts",
     "vscode:prepublish": "npm run build && npm run build:ext",
     "release": "tsx scripts/release.ts",
+    "retag": "tsx scripts/retag.ts",
     "publish:public": "tsx scripts/publish.ts",
     "start": "mkdir -p temp data && node dist/server/index.js",
     "discover": "tsx src/discovery/discover-dom.ts",
