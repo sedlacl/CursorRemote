@@ -8,7 +8,7 @@ const PKG_PATH = resolve(ROOT, 'package.json');
 const RELEASES_DIR = resolve(ROOT, 'releases');
 
 const DEV_PUBLISHER = 'cursor-remote-dev';
-const DEV_DISPLAY_NAME = 'CursorRemote (Dev)';
+const DEV_DISPLAY_NAME = 'QJohn CursorRemote (Dev)';
 
 function main(): void {
   const backup = readFileSync(PKG_PATH, 'utf-8');
@@ -28,7 +28,7 @@ function main(): void {
   const vsixPath = resolve(RELEASES_DIR, vsixName);
 
   try {
-    console.log(`[package:dev] Building CursorRemote (Dev) v${devVersion}`);
+    console.log(`[package:dev] Building QJohn CursorRemote (Dev) v${devVersion}`);
     execSync('npm run build && npm run build:ext', { cwd: ROOT, stdio: 'inherit' });
 
     if (!existsSync(RELEASES_DIR)) mkdirSync(RELEASES_DIR, { recursive: true });

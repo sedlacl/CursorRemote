@@ -1,17 +1,22 @@
-# CursorRemote
+# QJohn CursorRemote
 
-Remote control for your local Cursor AI agent — monitor sessions, approve steps, inspect full plans, and send tasks from your phone, tablet, or another computer's browser, or via Telegram, while Cursor runs on your machine.
+Self-hosted remote control for your local Cursor AI agent. Follow active conversations, manage Multitask subagents, approve commands, inspect Git changes, and send prompts from a phone, tablet, another computer, or Telegram while Cursor keeps running on your machine.
 
 <div align="center">
 
-| Mobile web app | Telegram |
-|:-:|:-:|
-| <img src="media/web-app.gif" alt="Mobile web app" width="300"> | <img src="media/telegram.gif" alt="Telegram integration" width="300"> |
+<img src="media/screenshots/web-client-desktop.png" alt="QJohn CursorRemote desktop web client" width="900">
 
-<p><b>Extension UI</b> — CursorRemote sidebar: server status, CDP connection, agent state, and start/stop</p>
-<img src="media/extension_tab.png" alt="CursorRemote extension sidebar with server controls and status" width="380">
+| Mobile control | Git review |
+|:-:|:-:|
+| <img src="media/screenshots/web-client-mobile.png" alt="QJohn CursorRemote mobile web client" width="300"> | <img src="media/screenshots/git-review.png" alt="Git review sheet with changed files" width="520"> |
 
 </div>
+
+## What is the QJohn edition?
+
+QJohn CursorRemote is the actively maintained `qjohn.cursor-remote` distribution, updated for current Cursor UI and its Multitask workflow. It adds context-aware approvals, subagent navigation and stopping, Git review, persistent diagnostic snapshots, and a React-based mobile web client while keeping all conversation data on your own machine.
+
+This extension uses a separate publisher ID and visual identity so it is not confused with the legacy `cursor-remote.cursor-remote` package. Existing installs of the legacy package must be removed once before installing QJohn CursorRemote.
 
 ## Features
 
@@ -58,7 +63,7 @@ Remote control for your local Cursor AI agent — monitor sessions, approve step
 
 ### 1. Install the Extension
 
-Download the latest `.vsix` from [releases](https://github.com/len5ky/CursorRemote/releases), then install:
+Install **QJohn CursorRemote** (`qjohn.cursor-remote`) from the Cursor Extensions view, or download the latest `.vsix` from [GitHub Releases](https://github.com/sedlacl/CursorRemote/releases), then install:
 
 ```bash
 # From the command line
@@ -167,7 +172,7 @@ Run the relay server directly from the command line — useful for headless mach
 ### Install and Run
 
 ```bash
-git clone https://github.com/len5ky/CursorRemote.git cursor-ide-remote
+git clone https://github.com/sedlacl/CursorRemote.git cursor-ide-remote
 cd cursor-ide-remote
 npm install
 cp .env.example .env

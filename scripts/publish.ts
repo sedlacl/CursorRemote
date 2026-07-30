@@ -35,7 +35,7 @@ function normalizePublicPackageJson(): void {
   const pkgPath = resolve(PUBLIC_ROOT, 'package.json');
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
   pkg.publisher = 'qjohn';
-  pkg.displayName = 'CursorRemote';
+  pkg.displayName = 'QJohn CursorRemote';
   pkg.version = parseBaseSemver(String(pkg.version)).base;
   writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
   console.log('✓ Normalized public package.json for marketplace (publisher qjohn)');
@@ -117,7 +117,7 @@ function packageVsix(version: string): string {
   const backup = readFileSync(pkgPath, 'utf-8');
   const pkg = JSON.parse(backup) as Record<string, unknown>;
   pkg.publisher = 'qjohn';
-  pkg.displayName = 'CursorRemote';
+  pkg.displayName = 'QJohn CursorRemote';
   pkg.version = version;
   writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
 

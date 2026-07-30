@@ -31,7 +31,7 @@ function main(): void {
     shell: process.platform === 'win32',
   });
 
-  console.log(`[cursor-install] ✓ Installed CursorRemote (Dev) v${devVersion}`);
+  console.log(`[cursor-install] ✓ Installed QJohn CursorRemote (Dev) v${devVersion}`);
 }
 
 main();

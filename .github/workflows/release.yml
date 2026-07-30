@@ -57,7 +57,7 @@ jobs:
           mkdir -p temp
           cp package.json temp/package.json.before-public-package
           trap 'mv temp/package.json.before-public-package package.json' EXIT
-          node -e "const fs = require('fs'); const pkg = require('./package.json'); pkg.publisher = 'qjohn'; pkg.displayName = 'CursorRemote'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
+          node -e "const fs = require('fs'); const pkg = require('./package.json'); pkg.publisher = 'qjohn'; pkg.displayName = 'QJohn CursorRemote'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
           npx @vscode/vsce package --no-dependencies --out "$VSIX_PATH"
           npx tsx scripts/verify-vsix.ts "$VSIX_PATH"
 
