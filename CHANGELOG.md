@@ -17,6 +17,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Composer queue, background tasks, and chat tab grouping** in the web client: queued follow-up messages are visible and actionable, background tasks have their own sheet, and chat tabs are grouped by project so multi-window setups stay readable.
 
 ### Changed
+- **Marketplace metadata now points to this repository**: Homepage, Repository, and Bugs links now target `sedlacl/CursorRemote`, and search keywords cover Cursor, remote access, mobile, Telegram, agents, and Multitask.
 - **Web client rebuilt on React + Vite** (`npm run build` now runs `tsc && vite build`). The UI is split into composable components, view models, and state stores instead of one hand-rolled `app.js`, which is what made the Multitask, approval, and git work above practical.
 - **Stop resolver now keys on stable attributes**: stopping a run resolves the target through Cursor's `data-tool-call-id` instead of an `nth-of-type` DOM path that shifted whenever the message list re-rendered. When the target is ambiguous the action is refused with an error rather than clicking whatever happens to be in that position — a mis-resolved stop used to hit an unrelated tool call.
 - **Breaking change — public extension identity is now `qjohn.cursor-remote`** (previously `cursor-remote.cursor-remote`). Existing installs do not update automatically: uninstall the old extension and install the new one.

@@ -6,7 +6,11 @@
   "publisher": "cursor-remote-dev",
   "repository": {
     "type": "git",
-    "url": "https://github.com/len5ky/CursorRemote"
+    "url": "https://github.com/sedlacl/CursorRemote"
+  },
+  "homepage": "https://github.com/sedlacl/CursorRemote#readme",
+  "bugs": {
+    "url": "https://github.com/sedlacl/CursorRemote/issues"
   },
   "type": "module",
   "main": "./dist/extension.cjs",
@@ -20,6 +24,15 @@
   "categories": [
     "Machine Learning",
     "Other"
+  ],
+  "keywords": [
+    "cursor",
+    "remote",
+    "mobile",
+    "telegram",
+    "ai",
+    "agent",
+    "multitask"
   ],
   "activationEvents": [
     "onStartupFinished"
