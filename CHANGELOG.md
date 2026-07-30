@@ -6,7 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [0.3.1] - 2026-07-30
+## [0.3.2] - 2026-07-30
 
 ### Added
 - **Multitask and subagent support in the web client**: when the agent spawns subagents, a status strip shows how many are running, each one is tappable to jump straight into that subagent's conversation, and a Stop button ends the run without switching to Cursor. Previously a Multitask run looked like a stalled conversation on mobile — the parent chat sat idle while all the real work happened in subagents you had no way to see or stop.
