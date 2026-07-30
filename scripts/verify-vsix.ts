@@ -45,18 +45,17 @@ function main(): void {
 
   let listing: string;
   try {
-    listing = execSync(`python3 -c "
-import zipfile, sys
-with zipfile.ZipFile(sys.argv[1]) as z:
-    for n in z.namelist():
-        print(n)
-" ${JSON.stringify(vsixPath)}`, { encoding: 'utf-8' });
+    // Single line: cmd.exe on Windows treats embedded newlines as command separators.
+    listing = execSync(
+      `python3 -c "import zipfile,sys;print('\\n'.join(zipfile.ZipFile(sys.argv[1]).namelist()))" ${JSON.stringify(vsixPath)}`,
+      { encoding: 'utf-8' },
+    );
   } catch {
     console.error(`✗ Could not read ${vsixPath}. Was it built?`);
     process.exit(1);
   }
 
-  const files = listing.trim().split('\n');
+  const files = listing.trim().split(/\r?\n/);
   let errors = 0;
 
   console.log('— Required files —');
@@ -102,12 +101,10 @@ with zipfile.ZipFile(sys.argv[1]) as z:
   const pkg = JSON.parse(readFileSync(PKG_PATH, 'utf-8'));
   const innerPkgFile = files.find(f => f === 'extension/package.json');
   if (innerPkgFile) {
-    const innerPkg = execSync(`python3 -c "
-import zipfile, sys, json
-with zipfile.ZipFile(sys.argv[1]) as z:
-    data = json.loads(z.read('extension/package.json'))
-    print(data.get('version', ''))
-" ${JSON.stringify(vsixPath)}`, { encoding: 'utf-8' }).trim();
+    const innerPkg = execSync(
+      `python3 -c "import zipfile,sys,json;print(json.loads(zipfile.ZipFile(sys.argv[1]).read('extension/package.json')).get('version',''))" ${JSON.stringify(vsixPath)}`,
+      { encoding: 'utf-8' },
+    ).trim();
     if (innerPkg === pkg.version) {
       console.log(`\n✓ Version match: ${pkg.version}`);
     } else {
