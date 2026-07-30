@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 function baseVersion(version: string): string {
@@ -17,6 +18,10 @@ test('SERVER_INSTANCE.version appends git build id for local workspace package',
   const pkg = JSON.parse(readFileSync(resolve('package.json'), 'utf-8')) as { version: string };
   const previousPackageRoot = process.env.PACKAGE_ROOT;
   process.env.PACKAGE_ROOT = resolve('.');
+  // Keep the diagnostic ID store out of the repo data dir.
+  const previousDataDir = process.env.DATA_DIR;
+  const tempDataDir = mkdtempSync(join(tmpdir(), 'cursor-remote-server-info-'));
+  process.env.DATA_DIR = tempDataDir;
 
   try {
     const serverInfo = await importFreshServerInfo();
@@ -30,5 +35,11 @@ test('SERVER_INSTANCE.version appends git build id for local workspace package',
     } else {
       process.env.PACKAGE_ROOT = previousPackageRoot;
     }
+    if (previousDataDir === undefined) {
+      delete process.env.DATA_DIR;
+    } else {
+      process.env.DATA_DIR = previousDataDir;
+    }
+    rmSync(tempDataDir, { recursive: true, force: true });
   }
 });

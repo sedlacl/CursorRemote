@@ -3282,102 +3282,53 @@ header {
   padding: 8px 14px;
 }
 
-/* --- Diagnostic ID badge (composer input bar) --- */
+/* --- Diagnostic ID badge (bottom-right of the message viewport) --- */
 
-#input-bar {
+.messages-region {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The overlay is a sibling of the scroll container, so the badge stays put while
+   the transcript scrolls. Only the badge itself is clickable. */
+.messages-diagnostic-anchor {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 14px;
+  pointer-events: none;
+}
+
+/* Room for the badge so the tail of the transcript can always scroll clear of it. */
+#messages {
+  padding-bottom: 20px;
 }
 
 .diagnostic-id-badge {
-  position: absolute;
-  top: 4px;
-  right: 10px;
-  z-index: 2;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: calc(100% - 20px);
-  padding: 2px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.22);
-  color: rgba(228, 228, 228, 0.62);
+  max-width: 55%;
+  padding: 2px 5px;
+  border: 1px solid rgba(228, 228, 228, 0.05);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-tertiary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
+  font-size: 9px;
   line-height: 1.2;
   letter-spacing: 0.04em;
   cursor: pointer;
   user-select: none;
+  pointer-events: auto;
   -webkit-tap-highlight-color: transparent;
-}
-
-.diagnostic-id-badge:hover,
-.diagnostic-id-badge:focus-visible {
-  color: rgba(228, 228, 228, 0.88);
-  border-color: rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.diagnostic-id-badge.copied {
-  color: #3794ff;
-  border-color: rgba(55, 148, 255, 0.35);
-}
-
-.diagnostic-id-label {
-  opacity: 0.72;
-  font-weight: 600;
-}
-
-.diagnostic-id-value {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#input-bar.input-bar-return-parent .diagnostic-id-badge {
-  top: 6px;
-  right: 12px;
-}
-
-@media (max-width: 360px) {
-  .diagnostic-id-badge {
-    top: 3px;
-    right: 8px;
-    font-size: 9px;
-    padding: 2px 5px;
-    max-width: 42%;
-  }
-}
-
-@media (min-width: 768px) {
-  #input-bar .diagnostic-id-badge {
-    right: max(10px, calc((100% - 800px) / 2 + 10px));
-  }
-}
-
-/* --- Diagnostic ID badge inside the composer input frame --- */
-
-/* In-flow item in the bottom-right of the input frame, left of the send button.
-   It only occupies space while the composer is empty, so a draft never renders behind it. */
-.input-row .diagnostic-id-badge {
-  position: static;
-  align-self: flex-end;
-  flex-shrink: 0;
-  margin-bottom: 10px;
-  max-width: 40%;
-  padding: 1px 5px;
-  border-radius: 5px;
-  font-size: 9px;
-}
-
-.input-wrapper.composer-has-draft .input-row .diagnostic-id-badge {
-  display: none;
-}
-
-.diagnostic-id-badge {
-  border-color: rgba(228, 228, 228, 0.05);
-  background: rgba(0, 0, 0, 0.25);
-  color: var(--text-tertiary);
 }
 
 .diagnostic-id-badge:hover,
@@ -3387,7 +3338,26 @@ header {
   color: var(--text-secondary);
 }
 
+.diagnostic-id-badge.copied {
+  color: #3794ff;
+  border-color: rgba(55, 148, 255, 0.35);
+}
+
 .diagnostic-id-label {
   opacity: 0.6;
+  font-weight: 600;
+}
+
+.diagnostic-id-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 768px) {
+  /* Line the badge up with the centred transcript column, clear of the scrollbar. */
+  .messages-diagnostic-anchor {
+    padding: 0 max(16px, calc((100% - 800px) / 2 + 10px));
+  }
 }
 

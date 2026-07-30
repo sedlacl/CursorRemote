@@ -8,16 +8,18 @@ import { useCommandClient } from '../../state/commandClient.js';
 import { useUiState } from '../../state/uiState.js';
 import { sanitizeHtml } from '../../utils/sanitizeHtml.js';
 import { getConnectionUiState } from '../../view-models/connectionState.js';
+import { DiagnosticIdBadge } from '../shell/DiagnosticIdBadge.js';
 import { MessageList } from './messageTypes.js';
 
 export interface MessageViewportProps {
   state: CursorState;
   socketConnected: boolean;
+  diagnosticId?: string | null;
 }
 
 const TRANSCRIPT_NAV_TIMEOUT_MS = 12000;
 
-export function MessageViewport({ state, socketConnected }: MessageViewportProps) {
+export function MessageViewport({ state, socketConnected, diagnosticId }: MessageViewportProps) {
   const messagesRef = useRef<HTMLElement | null>(null);
   const command = useCommandClient();
   const ui = useUiState();
@@ -98,23 +100,29 @@ export function MessageViewport({ state, socketConnected }: MessageViewportProps
   const displayMessages = transcriptNavPending ? [] : (state.messages || []);
 
   return (
-    <main id="messages" ref={messagesRef} role="log" aria-live="polite">
-      <div
-        id="transcript-nav-loader"
-        className={`history-loader ${showTranscriptLoader ? '' : 'hidden'}`}
-        aria-live="polite"
-      >
-        Opening chat...
+    <div className="messages-region">
+      <main id="messages" ref={messagesRef} role="log" aria-live="polite">
+        <div
+          id="transcript-nav-loader"
+          className={`history-loader ${showTranscriptLoader ? '' : 'hidden'}`}
+          aria-live="polite"
+        >
+          Opening chat...
+        </div>
+        <div id="history-loader" className={`history-loader ${historyLoading ? '' : 'hidden'}`} aria-live="polite">
+          Loading older messages...
+        </div>
+        {showTranscriptLoader ? null : displayMessages.length === 0 ? (
+          <EmptyState primary={connection.emptyPrimary} hint={connection.emptyHint} />
+        ) : (
+          <MessageList key={historyScopeKey} messages={displayMessages} />
+        )}
+      </main>
+      {/* Sits outside the scroll container so it stays pinned while the transcript scrolls. */}
+      <div className="messages-diagnostic-anchor">
+        <DiagnosticIdBadge diagnosticId={diagnosticId} />
       </div>
-      <div id="history-loader" className={`history-loader ${historyLoading ? '' : 'hidden'}`} aria-live="polite">
-        Loading older messages...
-      </div>
-      {showTranscriptLoader ? null : displayMessages.length === 0 ? (
-        <EmptyState primary={connection.emptyPrimary} hint={connection.emptyHint} />
-      ) : (
-        <MessageList key={historyScopeKey} messages={displayMessages} />
-      )}
-    </main>
+    </div>
   );
 }
 

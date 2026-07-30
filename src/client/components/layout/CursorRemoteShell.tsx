@@ -48,14 +48,14 @@ export function CursorRemoteShell({
       <ChatTabBar tabs={state.chatTabs || []} />
       <ExploratoryChrome chrome={state.exploratoryUi} />
       <MultitaskStatusStrip subagents={state.subagents} agentChanges={state.agentChanges} />
-      <MessageViewport state={state} socketConnected={socketConnected} />
-      <ApprovalBar state={state} />
-      <QuestionnaireBar state={state} />
-      <ComposerInput
+      <MessageViewport
         state={state}
-        setSendPending={setSendPending}
+        socketConnected={socketConnected}
         diagnosticId={serverHealth?.server?.diagnosticId}
       />
+      <ApprovalBar state={state} />
+      <QuestionnaireBar state={state} />
+      <ComposerInput state={state} setSendPending={setSendPending} />
       <BottomSheetHost
         state={state}
         serverHealth={serverHealth}

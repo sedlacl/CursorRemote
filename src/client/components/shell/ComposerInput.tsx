@@ -16,7 +16,6 @@ import {
   type BooleanStateSetter,
   type PendingAttachment,
 } from '../../types/ui.js';
-import { DiagnosticIdBadge } from './DiagnosticIdBadge.js';
 
 function AttachmentStrip({
   attachments,
@@ -40,7 +39,6 @@ function AttachmentStrip({
 export interface ComposerInputProps {
   state: CursorState;
   setSendPending: BooleanStateSetter;
-  diagnosticId?: string | null;
 }
 
 function composerPlaceholder(modeId: string): string {
@@ -65,7 +63,7 @@ function shouldShowReturnToParent(context: ActiveConversationContext | null | un
     && !context.composerInputAvailable;
 }
 
-export function ComposerInput({ state, setSendPending, diagnosticId }: ComposerInputProps) {
+export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
   const command = useCommandClient();
   const ui = useUiState();
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -82,8 +80,6 @@ export function ComposerInput({ state, setSendPending, diagnosticId }: ComposerI
   const backgroundTasks = getVisibleBackgroundTasks(state);
   const backgroundTaskCount = getBackgroundTaskCount(backgroundTasks);
   const gitStatus = getVisibleGitStatus(state);
-  // The diagnostic badge lives inside the input frame, so it steps aside once a draft is being typed.
-  const inputWrapperClass = `input-wrapper${text.length > 0 ? ' composer-has-draft' : ''}`;
 
   const clearAttachments = useCallback(() => {
     setAttachments([]);
@@ -197,7 +193,6 @@ export function ComposerInput({ state, setSendPending, diagnosticId }: ComposerI
     const label = `← Zpět k ${parentTitle}`;
     return (
       <footer id="input-bar" className="input-bar-return-parent">
-        <DiagnosticIdBadge diagnosticId={diagnosticId} />
         <button
           type="button"
           className="composer-return-parent-btn"
@@ -248,7 +243,7 @@ export function ComposerInput({ state, setSendPending, diagnosticId }: ComposerI
           )}
         </div>
       </div>
-      <div className={inputWrapperClass} onPaste={handlePaste}>
+      <div className="input-wrapper" onPaste={handlePaste}>
         <AttachmentStrip attachments={attachments} onRemove={id => setAttachments(items => items.filter(item => item.id !== id))} />
         <div className="input-row">
           <button
@@ -302,7 +297,6 @@ export function ComposerInput({ state, setSendPending, diagnosticId }: ComposerI
               void sendMessage();
             }}
           />
-          <DiagnosticIdBadge diagnosticId={diagnosticId} />
           <button id="btn-send" className="btn btn-send" disabled={!canSend} aria-label="Send" onClick={() => void sendMessage()}>
             <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
