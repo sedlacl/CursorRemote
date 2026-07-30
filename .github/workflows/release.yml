@@ -72,7 +72,12 @@ jobs:
           fi
 
       - name: Publish to Open VSX
-        if: ${{ secrets.OVSX_PAT != '' && (github.event_name != 'workflow_dispatch' || inputs.publish_open_vsx) }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_open_vsx }}
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: npx ovsx publish "$VSIX_PATH" -p "$OVSX_PAT"
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::warning::OVSX_PAT is not configured, skipping Open VSX publish."
+            exit 0
+          fi
+          npx ovsx publish "$VSIX_PATH" -p "$OVSX_PAT"
