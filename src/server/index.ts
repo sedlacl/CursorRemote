@@ -7,11 +7,13 @@ import { CommandExecutor } from './command-executor.js';
 import { StateManager } from './state-manager.js';
 import { WindowMonitor } from './window-monitor.js';
 import { Relay } from './relay.js';
+import { buildApprovalRegistry } from './approval-registry.js';
 import { ExtensionFileBridge } from './extension-file-bridge.js';
 import { SERVER_INSTANCE } from './server-info.js';
 import type { Transport } from './transports/types.js';
 import { TelegramTransport } from './transports/telegram/index.js';
 import { RawTelegramTransport } from './transports/telegram-raw/index.js';
+import { DomExportService } from './dom-export.js';
 
 const logStream = createWriteStream('./temp/server.log', { flags: 'a' });
 const origLog = console.log;
@@ -93,6 +95,28 @@ async function main(): Promise<void> {
 
   const windowMonitor = new WindowMonitor(cdpBridge, stateManager, extractor, config, selectors);
 
+  const refreshGlobalApprovals = (): void => {
+    const { notifications, registry } = buildApprovalRegistry(windowMonitor.getAllSnapshots());
+    stateManager.setGlobalApprovals(notifications, registry);
+  };
+
+  windowMonitor.on('window:update', () => {
+    refreshGlobalApprovals();
+  });
+  const domExportService = new DomExportService(
+    {
+      getWindows: () => cdpBridge.windows,
+      getActiveState: () => {
+        const state = stateManager.getCurrentState();
+        return {
+          activeWindowId: state.activeWindowId,
+          activeComposerId: state.activeComposerId,
+        };
+      },
+    },
+    selectors,
+  );
+
   cdpBridge.on('connected', () => {
     const client = cdpBridge.getClient();
     stateManager.onConnectionChanged(true);
@@ -117,9 +141,18 @@ async function main(): Promise<void> {
 
   extensionBridge.start();
 
-  const relay = new Relay(config, stateManager, commandExecutor, cdpBridge, extensionBridge, () => {
-    extractor.requestPoll(0);
-  });
+  const relay = new Relay(
+    config,
+    stateManager,
+    commandExecutor,
+    cdpBridge,
+    extensionBridge,
+    domExportService,
+    windowMonitor,
+    () => {
+      extractor.requestPoll(0);
+    },
+  );
   await relay.start();
 
   console.log('[main] Connecting to Cursor IDE...');
@@ -153,6 +186,7 @@ async function main(): Promise<void> {
   }
 
   windowMonitor.start();
+  refreshGlobalApprovals();
 
   const shutdown = async () => {
     console.log('\n[main] Shutting down...');

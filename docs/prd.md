@@ -194,7 +194,7 @@ Currently two transports are implemented:
 | `agentStatus`      | `AgentStatus`      | Durable header status (`idle`, `waiting_approval`, `error`, etc.) |
 | `agentActivityText` | `string \| null` | Live activity label; `null` means explicitly cleared on the wire |
 | `agentActivityLive` | `boolean` | True only when current DOM signals prove active work |
-| `agentActivitySource` | `'none' \| 'shimmer' \| 'loading_tool' \| 'loading_indicator' \| 'tail_thought'` | Provenance of the live activity signal |
+| `agentActivitySource` | `'none' \| 'shimmer' \| 'loading_tool' \| 'loading_indicator' \| 'tail_thought' \| 'subagents'` | Provenance of the live activity signal |
 | `messages`         | `ChatElement[]`    | Ordered chat elements (typed union)          |
 | `pendingApprovals` | `Approval[]`       | Tool calls currently awaiting user decision  |
 | `inputAvailable`   | `boolean`          | Whether the chat input is visible/focusable  |
@@ -205,10 +205,24 @@ Currently two transports are implemented:
 | `activeWindowId`   | `string`           | ID of the currently connected window         |
 | `composerQueue`    | `ComposerQueueState` | Prompts queued in composer toolbar         |
 | `questionnaire`    | `Questionnaire \| null` | Agent questionnaire widget (multiple-choice questions) |
+| `backgroundTasks`  | `BackgroundTask[]` | Currently active/stoppable background terminals/tools (not historical summaries or Multitask workers) |
+| `subagents`        | `SubagentState` | Multitask summary, running count, titles, models and statuses |
+| `agentChanges`     | `AgentChangesState` | Agent-authored file count and Review/Undo All capabilities, separate from Git |
 
 ### 4.2 AgentStatus
 
-One of: `idle`, `thinking`, `generating`, `running_tool`, `waiting_approval`, `error`
+One of: `idle`, `thinking`, `generating`, `running_tool`, `running_subagents`,
+`waiting_approval`, `waiting_question`, `waiting_user_input`, `error`.
+
+Busy-state precedence is actionable user interaction → running subagents →
+composer stop/loading/generating → completed/idle. Cursor may mark a parent
+composer `completed` while its Multitask workers are still running.
+
+Questionnaire DOM has stable, existing extraction and maps to
+`waiting_question`. Approval and generic input states remain separate in the
+model, but exact selectors for newer permission/approval surfaces are not
+added until observed live; existing robust approval extraction remains the
+fallback.
 
 ### 4.3 ChatElement (discriminated union)
 
@@ -219,16 +233,27 @@ Each element in the chat is one of eight types, identified by the `type` field:
 | Field       | Type                                    | Description                        |
 | ----------- | --------------------------------------- | ---------------------------------- |
 | `id`        | `string`                                | Message UUID from Cursor's DOM     |
-| `flatIndex` | `number`                                | Sequential position in the chat    |
+| `flatIndex` | `number`                                | Raw source index (not a universal sort key) |
 | `text`      | `string`                                | Plain text content                 |
 | `mentions`  | `{ name: string; mentionType: string }[]` | @ mentions (files, terminals, etc.) |
+
+Virtualized DOM snapshots use the pair `(data-pair-index, data-index)` as their
+local order key. `data-message-index` and row `data-index` are different
+coordinate systems (for example, a human fragment can be `54` inside virtual
+row `5`) and must not be compared directly.
+
+When full history is loaded from Cursor storage, its header position is the
+authoritative global `historyIndex`. A later DOM extraction may replace the
+content for the same stable message ID, but the merge preserves this stored
+position. This keeps both the current turn and incrementally loaded older turns
+chronological.
 
 #### AssistantMessage (`type: 'assistant'`)
 
 | Field        | Type                                                      | Description                        |
 | ------------ | --------------------------------------------------------- | ---------------------------------- |
 | `id`         | `string`                                                  | Message UUID                       |
-| `flatIndex`  | `number`                                                  | Sequential position                |
+| `flatIndex`  | `number`                                                  | Raw source index                   |
 | `text`       | `string`                                                  | Plain text content                 |
 | `html`       | `string`                                                  | Sanitized `.markdown-root` HTML    |
 | `codeBlocks` | `CodeBlockItem[]` (see §6.11) | Structured code/diff blocks for native web/Telegram rendering |
@@ -256,6 +281,18 @@ Each element in the chat is one of eight types, identified by the `type` field:
 | `id`        | `string` | Generated ID                  |
 | `flatIndex` | `number` | Sequential position           |
 | `duration`  | `string` | e.g. "4s"                     |
+| `action`    | `string?` | Stable activity header, e.g. `Thought` or `Explored` |
+| `detail`    | `string?` | Expanded stable summary, e.g. a filename or `briefly` |
+
+Current Cursor activity rows are extracted only when
+`data-message-kind="thinking"`,
+`data-react-transcript-row-kind="activityGroup"` and the confirmed
+`.agent-transcript-activity-group-collapsible` structure agree. This restores
+inline `Thought`/`Explored` progress without scanning global text.
+`Finished N background tasks` was visible in a supplied native screenshot but
+was not present in the live read-only DOM probe; if Cursor exposes it through
+the same activity-group structure it is retained as a thought row, otherwise
+no guessed selector or historical active-job count is introduced.
 
 #### PlanBlock (`type: 'plan'`)
 

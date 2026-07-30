@@ -1,8 +1,10 @@
+import 'dotenv/config';
 import { execSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { resolveDiagnosticId } from './diagnostic-id-store.js';
 
 export function getServerModuleDir(): string {
   if (typeof __dirname !== 'undefined') return __dirname;
@@ -55,8 +57,24 @@ function loadPackageVersion(): string {
   return 'unknown';
 }
 
+function loadDiagnosticId(): string {
+  const dataDir = process.env.DATA_DIR?.trim() || resolve(process.cwd(), 'data');
+  const resolved = resolveDiagnosticId({
+    dataDir,
+    workspace: process.cwd(),
+    port: process.env.SERVER_PORT?.trim() || 'default',
+    override: process.env.DIAGNOSTIC_ID,
+  });
+  console.log(
+    `[diagnostic-id] ${resolved.id} (${resolved.source}${resolved.persisted ? '' : ', in-memory only'})`,
+  );
+  return resolved.id;
+}
+
 export const SERVER_INSTANCE = {
   instanceId: randomBytes(4).toString('hex'),
+  /** Short Crockford base32 ID visible in the web UI and debug API; stable across restarts. */
+  diagnosticId: loadDiagnosticId(),
   startedAt: Date.now(),
   pid: process.pid,
   version: loadPackageVersion(),

@@ -2,6 +2,7 @@ export const MODE_OPTIONS = [
   { id: 'agent', label: 'Agent', icon: '∞' },
   { id: 'plan', label: 'Plan', icon: '☑' },
   { id: 'debug', label: 'Debug', icon: '🐛' },
+  { id: 'multitask', label: 'Multitask', icon: '◫' },
   { id: 'chat', label: 'Ask', icon: '💬' },
 ] as const;
 

@@ -4,6 +4,7 @@ import type {
   ChatElement,
   CursorState,
   RawSignals,
+  SubagentState,
 } from './types.js';
 
 /** Matches dom-extractor: header shows finished timing (for 2s or trailing 9s). */
@@ -93,13 +94,29 @@ function activityFromThoughtTail(messages?: ChatElement[], raw?: RawSignals): De
 export function deriveActivityFromSignals(
   raw: RawSignals,
   messages: ChatElement[] = [],
-  baseStatus: AgentStatus = 'idle'
+  baseStatus: AgentStatus = 'idle',
+  subagents: SubagentState = { runningCount: 0, summary: '', items: [] },
 ): DerivedActivityState {
-  if (baseStatus === 'waiting_approval') {
-    return { status: 'waiting_approval', activityText: null, isLive: false, source: 'none' };
+  if (
+    baseStatus === 'waiting_approval'
+    || baseStatus === 'waiting_question'
+    || baseStatus === 'waiting_user_input'
+  ) {
+    return { status: baseStatus, activityText: null, isLive: false, source: 'none' };
   }
   if (baseStatus === 'error') {
     return { status: 'error', activityText: null, isLive: false, source: 'none' };
+  }
+
+  if (subagents.runningCount > 0) {
+    const summary = subagents.summary.trim()
+      || `${subagents.runningCount} subagent${subagents.runningCount === 1 ? '' : 's'} running`;
+    return {
+      status: 'running_subagents',
+      activityText: sanitizeActivityLabel(summary, 'Subagents running'),
+      isLive: true,
+      source: 'subagents',
+    };
   }
 
   const activeShimmer = raw.shimmer.filter(
@@ -174,7 +191,12 @@ export function deriveActivityFromSignals(
 
 export function applyDerivedActivityToState(state: CursorState): CursorState {
   if (!state._rawSignals) return state;
-  const derived = deriveActivityFromSignals(state._rawSignals, state.messages, state.agentStatus);
+  const derived = deriveActivityFromSignals(
+    state._rawSignals,
+    state.messages,
+    state.agentStatus,
+    state.subagents,
+  );
   const preserveBusyStatus = derived.status === 'idle'
     && (state.agentStopAvailable || !!state.agentStopSelectorPath)
     && (state.agentStatus === 'generating' || state.agentStatus === 'running_tool' || state.agentStatus === 'thinking');

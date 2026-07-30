@@ -24,21 +24,31 @@ export function HeaderBar({
   const ui = useUiState();
   const command = useCommandClient();
   const [stopPending, setStopPending] = useState(false);
+  const [navigatePending, setNavigatePending] = useState(false);
   const lastKnownStopSelectorRef = useRef('');
   const connection = getConnectionUiState(state, socketConnected);
+  const globalApprovals = state.globalApprovalNotifications ?? [];
+  const primaryApproval = globalApprovals[0];
   const labels: Record<string, string> = {
     idle: 'Idle',
     thinking: 'Thinking...',
     generating: 'Generating...',
     running_tool: 'Running tool...',
+    running_subagents: 'Subagents running...',
     waiting_approval: 'Needs approval',
+    waiting_question: 'Needs an answer',
+    waiting_user_input: 'Waiting for input',
     error: 'Error',
   };
   const activity = (state.agentActivityText || '').trim();
   const showActivity = state.agentActivityLive && activity && state.agentStatus !== 'idle';
+  const suppressApprovalInRight = globalApprovals.length > 0
+    || state.agentStatus === 'waiting_approval';
   const rawStatusText = showActivity
     ? (activity.length > 56 ? `${activity.slice(0, 55)}...` : activity)
-    : (labels[state.agentStatus] || state.agentStatus);
+    : (suppressApprovalInRight && state.agentStatus === 'waiting_approval'
+      ? (labels.idle)
+      : (labels[state.agentStatus] || state.agentStatus));
   const stopState = buildStopButtonState({
     state,
     sendPending,
@@ -51,10 +61,14 @@ export function HeaderBar({
   const stopEnabled = stopState.stopEnabled;
   const statusText = stopPending
     ? 'Stopping...'
-    : sendPending && !showActivity && state.agentStatus === 'idle'
-      ? 'Sending...'
-      : rawStatusText;
-  const statusStyle = state.agentStatus === 'waiting_approval'
+    : navigatePending
+      ? 'Opening approval...'
+      : sendPending && !showActivity && state.agentStatus === 'idle'
+        ? 'Sending...'
+        : rawStatusText;
+  const waitingForUser = (state.agentStatus === 'waiting_question' || state.agentStatus === 'waiting_user_input')
+    || (state.agentStatus === 'waiting_approval' && globalApprovals.length === 0);
+  const statusStyle = waitingForUser || globalApprovals.length > 0
     ? { color: 'var(--accent-yellow)' }
     : state.agentStatus === 'error'
       ? { color: 'var(--accent-red)' }
@@ -70,6 +84,12 @@ export function HeaderBar({
     return () => window.clearTimeout(timer);
   }, [sendPending, stopPending, stopState.realStopAvailable]);
 
+  useEffect(() => {
+    if (!navigatePending) return;
+    const timer = window.setTimeout(() => setNavigatePending(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [navigatePending]);
+
   const handleStop = async () => {
     if (!stopEnabled) return;
     setStopPending(true);
@@ -79,6 +99,23 @@ export function HeaderBar({
       ui.showToast(result.error || 'Stop failed', 'error');
     }
   };
+
+  const handleNavigateApproval = async () => {
+    if (!primaryApproval || navigatePending) return;
+    setNavigatePending(true);
+    const result = await command.sendCommandAwaitResult('command:navigate_to_approval', {
+      approvalId: primaryApproval.id,
+    });
+    setNavigatePending(false);
+    if (!result.ok) {
+      ui.showToast(result.error || 'Could not open approval', 'error');
+    }
+  };
+
+  const approvalSummary = primaryApproval
+    ? `Needs approval · ${primaryApproval.chatTitle || primaryApproval.summary}`
+    : '';
+  const approvalCountLabel = globalApprovals.length > 1 ? ` (${globalApprovals.length})` : '';
 
   return (
     <header id="header">
@@ -97,13 +134,32 @@ export function HeaderBar({
           </button>
         )}
       </div>
+      {primaryApproval ? (
+        <div className="header-center">
+          <button
+            id="global-approval-notification"
+            type="button"
+            className="global-approval-notification"
+            aria-live="polite"
+            aria-label={`${approvalSummary}${approvalCountLabel}. Open approval context.`}
+            title={approvalSummary}
+            disabled={navigatePending}
+            onClick={() => void handleNavigateApproval()}
+          >
+            <span className="global-approval-notification-label">
+              {approvalSummary}
+              {approvalCountLabel}
+            </span>
+          </button>
+        </div>
+      ) : null}
       <div className="header-right">
         <span id="agent-status-icon">
-          {state.agentStatus === 'waiting_approval' ? '!' : state.agentStatus === 'error' ? 'x' : ''}
+          {waitingForUser ? '!' : state.agentStatus === 'error' ? 'x' : ''}
         </span>
         <span
           id="agent-status-text"
-          className={!stopPending && (showActivity || sendPending) ? 'agent-status-shimmer' : ''}
+          className={!stopPending && !navigatePending && (showActivity || sendPending) ? 'agent-status-shimmer' : ''}
           style={statusStyle}
         >
           {statusText}

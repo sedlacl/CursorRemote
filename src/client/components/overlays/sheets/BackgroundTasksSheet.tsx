@@ -19,9 +19,9 @@ export function BackgroundTasksSheet({ state, visible }: BackgroundTasksSheetPro
   const tasks = getBackgroundTasksForSheet(getVisibleBackgroundTasks(state));
   return (
     <div id="sheet-background-tasks" className={`bottom-sheet ${visible ? '' : 'hidden'}`}>
-      <div className="sheet-header">Background Tasks</div>
+      <div className="sheet-header">Active Background Jobs</div>
       <div id="sheet-background-tasks-list" className="sheet-list">
-        {tasks.length === 0 && <p className="sheet-tab-hint">No background tasks are running.</p>}
+        {tasks.length === 0 && <p className="sheet-tab-hint">No active background jobs.</p>}
         {tasks.map((task, index) => (
           <div key={task.id || index} className="background-task-sheet-item">
             <div className="background-task-sheet-main">

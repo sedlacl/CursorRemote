@@ -13,6 +13,7 @@ import { ChatTabBar } from '../shell/ChatTabBar.js';
 import { ComposerInput } from '../shell/ComposerInput.js';
 import { ComposerQueueStrip } from '../shell/ComposerQueueStrip.js';
 import { HeaderBar } from '../shell/HeaderBar.js';
+import { MultitaskStatusStrip } from '../shell/MultitaskStatusStrip.js';
 import { WindowPicker } from '../shell/WindowPicker.js';
 
 export interface CursorRemoteShellProps {
@@ -46,10 +47,15 @@ export function CursorRemoteShell({
       <WindowPicker windows={state.windows || []} activeWindowId={state.activeWindowId} />
       <ChatTabBar tabs={state.chatTabs || []} />
       <ExploratoryChrome chrome={state.exploratoryUi} />
+      <MultitaskStatusStrip subagents={state.subagents} agentChanges={state.agentChanges} />
       <MessageViewport state={state} socketConnected={socketConnected} />
-      <ApprovalBar approvals={state.pendingApprovals || []} />
+      <ApprovalBar state={state} />
       <QuestionnaireBar state={state} />
-      <ComposerInput state={state} setSendPending={setSendPending} />
+      <ComposerInput
+        state={state}
+        setSendPending={setSendPending}
+        diagnosticId={serverHealth?.server?.diagnosticId}
+      />
       <BottomSheetHost
         state={state}
         serverHealth={serverHealth}

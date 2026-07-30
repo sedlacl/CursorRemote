@@ -16,7 +16,10 @@
     agentActivitySource: 'none',
     messages: [],
     pendingApprovals: [],
+    globalApprovalNotifications: [],
     inputAvailable: false,
+    composerInputAvailable: false,
+    activeConversationContext: null,
     chatTabs: [],
     mode: { current: 'agent', available: [] },
     model: { current: 'Auto', currentId: '' },
@@ -24,6 +27,9 @@
     activeWindowId: '',
     composerQueue: { items: [] },
     questionnaire: null,
+    backgroundTasks: [],
+    subagents: { runningCount: 0, summary: '', items: [] },
+    agentChanges: { fileCount: 0, reviewAvailable: false, undoAllAvailable: false },
   };
 
   function getAuthToken() {
@@ -772,12 +778,17 @@
       thinking: '',
       generating: '',
       running_tool: '',
+      running_subagents: '',
       waiting_approval: '!',
+      waiting_question: '!',
+      waiting_user_input: '!',
       error: '\u2715',
     };
     const labels = {
       idle: 'Idle', thinking: 'Thinking...', generating: 'Generating...',
-      running_tool: 'Running tool...', waiting_approval: 'Needs approval', error: 'Error',
+      running_tool: 'Running tool...', running_subagents: 'Subagents running...',
+      waiting_approval: 'Needs approval', waiting_question: 'Needs an answer',
+      waiting_user_input: 'Waiting for input', error: 'Error',
     };
     $statusIcon.textContent = icons[state.agentStatus] || '';
     const activity = (state.agentActivityText || '').trim();
@@ -796,7 +807,9 @@
       $statusText.classList.remove('agent-status-shimmer');
     }
 
-    if (state.agentStatus === 'waiting_approval') $statusText.style.color = 'var(--accent-yellow)';
+    if (['waiting_approval', 'waiting_question', 'waiting_user_input'].includes(state.agentStatus)) {
+      $statusText.style.color = 'var(--accent-yellow)';
+    }
     else if (state.agentStatus === 'error') $statusText.style.color = 'var(--accent-red)';
     else $statusText.style.color = '';
   }

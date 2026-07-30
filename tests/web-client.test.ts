@@ -436,8 +436,11 @@ describe('web: mode/model pills', () => {
     fireFullState(env.mockSocket, fixture[0].state!);
     const modeText = env.document.getElementById('pill-mode-text')!;
     const modelText = env.document.getElementById('pill-model-text')!;
+    const input = env.document.getElementById('message-input') as HTMLTextAreaElement;
     assert.ok(modeText.textContent!.length > 0, 'Mode text should be set');
     assert.ok(modelText.textContent!.length > 0, 'Model text should be set');
+    assert.match(input.placeholder, /\/ for skills/);
+    assert.match(input.placeholder, /@ for context/);
   });
 });
 
@@ -570,7 +573,7 @@ describe('web: background tasks', () => {
     });
 
     const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
-    assert.equal(pill.textContent, 'B:2');
+    assert.equal(pill.textContent, 'Jobs:2');
 
     act(() => pill.click());
     const sheet = env.document.getElementById('sheet-background-tasks')!;
@@ -593,7 +596,7 @@ describe('web: background tasks', () => {
     });
 
     const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
-    assert.equal(pill.textContent, 'B:1');
+    assert.equal(pill.textContent, 'Jobs:1');
     assert.ok(!pill.classList.contains('count-pill-idle'));
 
     act(() => pill.click());
@@ -613,7 +616,7 @@ describe('web: background tasks', () => {
     });
 
     const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
-    assert.equal(pill.textContent, 'B:2');
+    assert.equal(pill.textContent, 'Jobs:2');
   });
 
   it('adds toolbar background count and foreground waiting commands for the pill', () => {
@@ -626,7 +629,7 @@ describe('web: background tasks', () => {
     });
 
     const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
-    assert.equal(pill.textContent, 'B:2');
+    assert.equal(pill.textContent, 'Jobs:2');
   });
 
   it('does not render foreground waiting commands in the background task sheet', () => {
@@ -639,7 +642,7 @@ describe('web: background tasks', () => {
     });
 
     const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
-    assert.equal(pill.textContent, 'B:3');
+    assert.equal(pill.textContent, 'Jobs:3');
 
     act(() => pill.click());
 
@@ -665,10 +668,8 @@ describe('web: background tasks', () => {
       ],
     });
 
-    const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
-    assert.ok(pill, 'Expected background pill to stay reserved');
-    assert.equal(pill.textContent, 'B:0');
-    assert.ok(pill.classList.contains('count-pill-idle'));
+    const pill = env.document.getElementById('pill-background-tasks');
+    assert.equal(pill, null, 'Expected zero active jobs to stay hidden');
   });
 });
 
@@ -854,6 +855,37 @@ describe('web: debug panel', () => {
     const sheet = env.document.getElementById('sheet-debug');
     assert.ok(sheet, 'Expected debug sheet to open');
     assert.equal(sheet?.classList.contains('hidden'), false);
+    assert.ok(sheet?.textContent?.includes('not sanitized'));
+
+    firePatch(env.mockSocket, {
+      activeWindowId: 'window-1',
+      activeComposerId: 'composer-1',
+    });
+    const chatExport = env.document.getElementById('debug-export-chat') as HTMLButtonElement;
+    const documentExport = env.document.getElementById('debug-export-document') as HTMLButtonElement;
+    assert.equal(chatExport.disabled, false);
+    assert.equal(documentExport.disabled, false);
+
+    let warning = '';
+    let exportRequested = false;
+    const previousConfirm = env.window.confirm;
+    env.window.confirm = (message?: string) => {
+      warning = message ?? '';
+      return false;
+    };
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => {
+        exportRequested = true;
+        throw new Error('Unexpected export request');
+      },
+      configurable: true,
+    });
+    await act(async () => {
+      documentExport.click();
+    });
+    env.window.confirm = previousConfirm;
+    assert.match(warning, /chats, code, terminal output, local paths, and secrets/i);
+    assert.equal(exportRequested, false);
   });
 
   it('sends kill server command from debug sheet', async () => {

@@ -24,6 +24,7 @@ export function loadConfig(): ServerConfig {
     selectorsPath: process.env.SELECTORS_PATH ?? './selectors.json',
     logLevel: (process.env.LOG_LEVEL as ServerConfig['logLevel']) ?? 'info',
     webappPassword: process.env.WEBAPP_PASSWORD ?? '',
+    diagnosticToken: process.env.DIAGNOSTIC_TOKEN ?? '',
     windowTitleQualifier: process.env.WINDOW_TITLE_QUALIFIER !== 'false',
     dataDir,
     cursorStateDbPath: process.env.CURSOR_STATE_DB_PATH ?? defaultCursorStateDbPath,
@@ -85,10 +86,10 @@ function getDefaultSelectors(): SelectorConfig {
     },
     agentStatus: {
       strategies: [
-        "[class*='status']",
-        "[class*='thinking']",
-        "[class*='spinner']",
-        "[class*='loading']",
+        ".composer-messages-container [class*='thinking']",
+        ".composer-messages-container .loading-indicator-v3",
+        ".composer-messages-container [data-shimmer='true']",
+        "#composer-toolbar-section .spinning-loader",
       ],
     },
   };

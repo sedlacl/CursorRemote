@@ -78,6 +78,31 @@ export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
         showToast(result.error || 'Command failed', 'error');
       }
     };
+    const onDiagnosticCollect = (payload: { requestId?: string; parts?: string[] }) => {
+      const requestId = payload?.requestId?.trim();
+      if (!requestId || !payload.parts?.includes('web-dom')) return;
+      const html = document.documentElement.outerHTML;
+      const bytes = new TextEncoder().encode(html).byteLength;
+      const maxBytes = 2 * 1024 * 1024;
+      if (bytes > maxBytes) {
+        socket.emit('diagnostic:collect-response', {
+          requestId,
+          error: 'too_large',
+          bytes,
+        });
+        return;
+      }
+      socket.emit('diagnostic:collect-response', {
+        requestId,
+        webDom: {
+          html,
+          bytes,
+          url: window.location.href,
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+          collectedAt: new Date().toISOString(),
+        },
+      });
+    };
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
@@ -86,6 +111,7 @@ export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
     socket.on('state:patch', onStatePatch);
     socket.on('connection:status', onConnectionStatus);
     socket.on('command:result', onCommandResult);
+    socket.on('diagnostic:collect', onDiagnosticCollect);
     socket.connect?.();
 
     return () => {
@@ -96,6 +122,7 @@ export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
       socket.off?.('state:patch', onStatePatch as (...args: unknown[]) => void);
       socket.off?.('connection:status', onConnectionStatus as (...args: unknown[]) => void);
       socket.off?.('command:result', onCommandResult as (...args: unknown[]) => void);
+      socket.off?.('diagnostic:collect', onDiagnosticCollect as (...args: unknown[]) => void);
     };
   }, [authReady, commandClient, showToast, socket]);
 

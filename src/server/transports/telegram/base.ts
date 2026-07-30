@@ -1192,7 +1192,7 @@ export abstract class BaseTelegramTransport implements Transport {
     const state = this.stateManager.getCurrentState();
     const active =
       state.agentActivityLive &&
-      ['thinking', 'generating', 'running_tool'].includes(state.agentStatus);
+      ['thinking', 'generating', 'running_tool', 'running_subagents'].includes(state.agentStatus);
 
     if (active && !this.typingInterval) {
       this.sendTyping();

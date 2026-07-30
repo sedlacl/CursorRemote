@@ -12,6 +12,10 @@ export interface CursorWindow {
 /** Raw DOM element snapshot — what was actually in the DOM, independent of parsing. */
 export interface RawElement {
   flatIndex: number;
+  /** Native conversation pair; stable across virtualized history windows. */
+  turnIndex?: number;
+  /** Native row position inside the pair. */
+  turnOrder?: number;
   role?: string;
   kind?: string;
   messageId?: string;
@@ -87,6 +91,61 @@ export interface BackgroundTask {
   stopSelectorPath?: string;
 }
 
+export type SubagentStatus = 'running' | 'completed' | 'waiting' | 'error' | 'unknown';
+
+export type SubagentStopKind = 'cardStop' | 'toolbarStop' | 'singleJobAfterExpand';
+
+/** Stable server-side stop target descriptor; resolved at command time. */
+export interface SubagentStopDescriptor {
+  kind: SubagentStopKind;
+  matchTitle: string;
+  matchModel?: string;
+  toolCallId?: string;
+  messageId?: string;
+  composerId?: string;
+}
+
+export interface SubagentItemCapabilities {
+  openSelectorPath?: string;
+  toolbarExpandSelectorPath?: string;
+  matchTitle: string;
+  matchModel?: string;
+  stop?: SubagentStopDescriptor;
+  /** @deprecated Short-lived fallback when resolver misses; never sent to client. */
+  legacyStopSelectorPath?: string;
+}
+
+export interface SubagentItem {
+  id: string;
+  title: string;
+  model?: string;
+  status: SubagentStatus;
+  statusText?: string;
+  /** Card open action is available in the current DOM snapshot. */
+  openAvailable: boolean;
+  /** Matched toolbar stop action is available for this subagent. */
+  stopAvailable: boolean;
+  /** Server-only selector targets; stripped before socket emit. */
+  _capabilities?: SubagentItemCapabilities;
+}
+
+/** Multitask workers are distinct from background terminals/tools. */
+export interface SubagentState {
+  runningCount: number;
+  /** Cursor toolbar summary, e.g. "1 subagent running". */
+  summary: string;
+  items: SubagentItem[];
+}
+
+/** Agent-authored file changes shown in Cursor's composer toolbar (not Git SCM). */
+export interface AgentChangesState {
+  fileCount: number;
+  reviewAvailable: boolean;
+  undoAllAvailable: boolean;
+  reviewSelectorPath?: string;
+  undoAllSelectorPath?: string;
+}
+
 /** Exploratory Cursor chrome not yet fully extracted — populated after CDP probe. */
 export interface CloudWidget {
   id: string;
@@ -108,6 +167,18 @@ export interface ExploratoryUiChrome {
   subagentTrays: SubagentTrayItem[];
 }
 
+export interface ActiveConversationContext {
+  kind: 'orchestrator' | 'subagent';
+  composerId: string;
+  depth: number;
+  parentComposerId?: string;
+  parentWindowId?: string;
+  parentTitle?: string;
+  rootOrchestratorComposerId?: string;
+  returnToParentAvailable: boolean;
+  composerInputAvailable: boolean;
+}
+
 export interface CursorState {
   connected: boolean;
   /** Health of DOM extraction independent from the CDP websocket connection. */
@@ -126,8 +197,15 @@ export interface CursorState {
   /** Provenance of the current activity signal, for transports/debugging. */
   agentActivitySource: ActivitySource;
   messages: ChatElement[];
+  /** Approvals for the active window+composer only (context-local). */
   pendingApprovals: Approval[];
+  /** Cross-window approval notifications for header UI; no executable selectors. */
+  globalApprovalNotifications: GlobalApprovalNotification[];
   inputAvailable: boolean;
+  /** True when the active composer bar exposes a real chat input (scoped, not global editor textarea). */
+  composerInputAvailable: boolean;
+  /** Active chat hierarchy context for subagent navigation UI. */
+  activeConversationContext: ActiveConversationContext | null;
   chatTabs: ChatTab[];
   /** data-composer-id of the active composer in the extracted DOM. Stable
    *  across windows that share an agent via Cursor's global rail; differs
@@ -143,6 +221,10 @@ export interface CursorState {
   questionnaire: Questionnaire | null;
   /** Background shell/tool tasks visible in Cursor's composer. */
   backgroundTasks: BackgroundTask[];
+  /** Cursor Multitask workers; never merged into backgroundTasks. */
+  subagents: SubagentState;
+  /** Agent-authored changes from the composer toolbar, separate from extension gitStatus. */
+  agentChanges: AgentChangesState;
   /** Git/source-control summary provided by the extension host for the owner workspace. */
   gitStatus: GitStatusInfo | null;
   /** File-level git snapshot for mobile SCM review (active window). */
@@ -189,7 +271,10 @@ export type AgentStatus =
   | 'thinking'
   | 'generating'
   | 'running_tool'
+  | 'running_subagents'
   | 'waiting_approval'
+  | 'waiting_question'
+  | 'waiting_user_input'
   | 'error';
 
 export type ActivitySource =
@@ -197,7 +282,8 @@ export type ActivitySource =
   | 'shimmer'
   | 'loading_tool'
   | 'loading_indicator'
-  | 'tail_thought';
+  | 'tail_thought'
+  | 'subagents';
 
 export type ChatElement =
   | HumanMessage
@@ -209,10 +295,19 @@ export type ChatElement =
   | RunCommand
   | LoadingIndicator;
 
-export interface HumanMessage {
+export interface TranscriptOrder {
+  flatIndex: number;
+  /** Authoritative global header position loaded from Cursor storage. */
+  historyIndex?: number;
+  /** Native `data-pair-index`; preferred for chronological sorting when present. */
+  turnIndex?: number;
+  /** Native virtual-row `data-index` within `turnIndex`. */
+  turnOrder?: number;
+}
+
+export interface HumanMessage extends TranscriptOrder {
   type: 'human';
   id: string;
-  flatIndex: number;
   text: string;
   mentions: { name: string; mentionType: string }[];
   /** Quoted / reply preview from composer (e.g. ProseMirror blockquote). */
@@ -232,19 +327,17 @@ export interface CodeBlockItem {
   diffLines?: { kind: DiffLineKind; text: string }[];
 }
 
-export interface AssistantMessage {
+export interface AssistantMessage extends TranscriptOrder {
   type: 'assistant';
   id: string;
-  flatIndex: number;
   text: string;
   html: string;
   codeBlocks: CodeBlockItem[];
 }
 
-export interface ToolCallElement {
+export interface ToolCallElement extends TranscriptOrder {
   type: 'tool';
   id: string;
-  flatIndex: number;
   toolCallId: string;
   status: 'loading' | 'completed';
   action: string;
@@ -259,10 +352,9 @@ export interface ToolCallElement {
   diffBlock?: CodeBlockItem;
 }
 
-export interface ThoughtBlock {
+export interface ThoughtBlock extends TranscriptOrder {
   type: 'thought';
   id: string;
-  flatIndex: number;
   duration: string;
   action?: string;
   detail?: string;
@@ -281,10 +373,9 @@ export interface PlanAction {
   selectorPath: string;
 }
 
-export interface PlanBlock {
+export interface PlanBlock extends TranscriptOrder {
   type: 'plan';
   id: string;
-  flatIndex: number;
   label: string;
   title: string;
   todosCompleted: number;
@@ -313,10 +404,9 @@ export interface PlanFullData {
   bodyHtml: string;
 }
 
-export interface TodoListBlock {
+export interface TodoListBlock extends TranscriptOrder {
   type: 'todo_list';
   id: string;
-  flatIndex: number;
   title: string;
   todosCompleted: number;
   todosTotal: number;
@@ -329,10 +419,9 @@ export interface RunAction {
   selectorPath: string;
 }
 
-export interface RunCommand {
+export interface RunCommand extends TranscriptOrder {
   type: 'run_command';
   id: string;
-  flatIndex: number;
   toolCallId: string;
   description: string;
   candidates: string;
@@ -340,17 +429,45 @@ export interface RunCommand {
   actions: RunAction[];
 }
 
-export interface LoadingIndicator {
+export interface LoadingIndicator extends TranscriptOrder {
   type: 'loading';
   id: string;
-  flatIndex: number;
   text?: string;
 }
 
 export interface Approval {
   id: string;
   description: string;
+  /** Human-readable card title when distinct from command. */
+  title?: string;
+  /** Shell command awaiting approval. */
+  command?: string;
+  /** Auto-review / smart-mode block reason text. */
+  reason?: string;
+  /** Policy label, e.g. Auto-review. */
+  mode?: string;
+  /** data-composer-id of the owning chat composer. */
+  composerId?: string;
+  /** Active chat tab title when extracted. */
+  chatTitle?: string;
+  /** Owning Cursor window target id (filled server-side). */
+  windowId?: string;
   actions: ApprovalAction[];
+}
+
+/** Client-safe approval notification without action selectors. */
+export interface GlobalApprovalNotification {
+  id: string;
+  windowId: string;
+  windowTitle: string;
+  composerId: string;
+  chatTitle: string;
+  summary: string;
+  title?: string;
+  command?: string;
+  reason?: string;
+  mode?: string;
+  timestamp: number;
 }
 
 export interface ApprovalAction {
@@ -382,7 +499,7 @@ export interface MessageAttachment {
 
 export interface CommandPayload {
   commandId: string;
-  type: 'send_message' | 'approve' | 'reject' | 'approve_all' | 'switch_tab' | 'close_tab' | 'new_chat' | 'set_mode' | 'set_model' | 'click_action' | 'stop_agent' | 'get_plan_full' | 'get_plan_model_options' | 'set_plan_model' | 'load_history' | 'open_source_control' | 'open_transcript_link' | 'kill_server';
+  type: 'send_message' | 'approve' | 'reject' | 'approve_all' | 'switch_tab' | 'close_tab' | 'new_chat' | 'set_mode' | 'set_model' | 'click_action' | 'stop_agent' | 'open_subagent' | 'stop_subagent' | 'return_to_parent' | 'get_plan_full' | 'get_plan_model_options' | 'set_plan_model' | 'load_history' | 'open_source_control' | 'open_transcript_link' | 'kill_server' | 'navigate_to_approval';
   /** Scroll steps in Cursor IDE when loading older chat history (load_history). */
   times?: number;
   text?: string;
@@ -402,6 +519,8 @@ export interface CommandPayload {
   /** Visible anchor text for title-based fallback when opening by composerId fails. */
   linkLabel?: string;
   windowId?: string;
+  /** Stable subagent id from extracted state (`subagents.items[].id`). */
+  subagentId?: string;
 }
 
 export interface CommandResult {
@@ -420,6 +539,8 @@ export interface ServerConfig {
   selectorsPath: string;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   webappPassword: string;
+  /** Optional Bearer token for agent access to /debug/* when WEBAPP_PASSWORD is set. */
+  diagnosticToken: string;
   windowTitleQualifier: boolean;
   dataDir: string;
   cursorStateDbPath?: string;

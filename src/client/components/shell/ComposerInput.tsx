@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import type { CursorState } from '../../../server/types.js';
+import type { ActiveConversationContext, CursorState } from '../../../server/types.js';
 import { modeUi } from '../../constants/modeOptions.js';
 import { useTextareaAutosize } from '../../hooks/useTextareaAutosize.js';
 import { useCommandClient } from '../../state/commandClient.js';
@@ -16,6 +16,7 @@ import {
   type BooleanStateSetter,
   type PendingAttachment,
 } from '../../types/ui.js';
+import { DiagnosticIdBadge } from './DiagnosticIdBadge.js';
 
 function AttachmentStrip({
   attachments,
@@ -39,9 +40,32 @@ function AttachmentStrip({
 export interface ComposerInputProps {
   state: CursorState;
   setSendPending: BooleanStateSetter;
+  diagnosticId?: string | null;
 }
 
-export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
+function composerPlaceholder(modeId: string): string {
+  switch (modeId) {
+    case 'plan':
+      return 'Describe a plan, / for skills, @ for context';
+    case 'debug':
+      return 'Describe an issue, / for skills, @ for context';
+    case 'multitask':
+      return 'Delegate work, / for skills, @ for context';
+    case 'chat':
+      return 'Ask a question, / for skills, @ for context';
+    default:
+      return 'Plan, build, / for skills, @ for context';
+  }
+}
+
+function shouldShowReturnToParent(context: ActiveConversationContext | null | undefined): context is ActiveConversationContext {
+  return !!context
+    && context.kind === 'subagent'
+    && context.returnToParentAvailable
+    && !context.composerInputAvailable;
+}
+
+export function ComposerInput({ state, setSendPending, diagnosticId }: ComposerInputProps) {
   const command = useCommandClient();
   const ui = useUiState();
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -49,12 +73,17 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
   const autosize = useTextareaAutosize(inputRef);
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [returnPending, setReturnPending] = useState(false);
+  const conversationContext = state.activeConversationContext;
+  const showReturnToParent = shouldShowReturnToParent(conversationContext);
   const inputDisabled = !state.inputAvailable;
   const canSend = !inputDisabled && (text.trim().length > 0 || attachments.length > 0);
   const currentMode = modeUi(state.mode?.current);
   const backgroundTasks = getVisibleBackgroundTasks(state);
   const backgroundTaskCount = getBackgroundTaskCount(backgroundTasks);
   const gitStatus = getVisibleGitStatus(state);
+  // The diagnostic badge lives inside the input frame, so it steps aside once a draft is being typed.
+  const inputWrapperClass = `input-wrapper${text.length > 0 ? ' composer-has-draft' : ''}`;
 
   const clearAttachments = useCallback(() => {
     setAttachments([]);
@@ -115,6 +144,21 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
     ui.showToast('Message sent', 'success');
   }, [attachments, autosize, clearAttachments, command, setSendPending, text, ui]);
 
+  const returnToParent = useCallback(async () => {
+    if (!conversationContext?.parentComposerId) return;
+    setReturnPending(true);
+    try {
+      const result = await command.sendCommandAwaitResult('command:return_to_parent', {
+        composerId: conversationContext.composerId,
+      });
+      if (!result.ok) {
+        ui.showToast(result.error || 'Nepodařilo se vrátit k rodičovské konverzaci', 'error');
+      }
+    } finally {
+      setReturnPending(false);
+    }
+  }, [command, conversationContext, ui]);
+
   const openBackgroundTasks = useCallback(() => {
     const expandSelectorPath = backgroundTasks.find(task => task.expandSelectorPath)?.expandSelectorPath;
     if (expandSelectorPath) {
@@ -148,6 +192,25 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
     ui.openGitSheet();
   }, [gitStatus, ui]);
 
+  if (showReturnToParent) {
+    const parentTitle = conversationContext.parentTitle?.trim() || 'rodičovské konverzaci';
+    const label = `← Zpět k ${parentTitle}`;
+    return (
+      <footer id="input-bar" className="input-bar-return-parent">
+        <DiagnosticIdBadge diagnosticId={diagnosticId} />
+        <button
+          type="button"
+          className="composer-return-parent-btn"
+          aria-label={`Vrátit se k rodičovské konverzaci: ${parentTitle}`}
+          disabled={returnPending}
+          onClick={() => void returnToParent()}
+        >
+          {returnPending ? 'Přepínám…' : label}
+        </button>
+      </footer>
+    );
+  }
+
   return (
     <footer id="input-bar">
       <div id="mode-model-bar" className="mode-model-bar">
@@ -172,18 +235,20 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
               F:{gitStatus.changedCount}
             </button>
           )}
-          <button
-            id="pill-background-tasks"
-            className={`background-task-pill${backgroundTaskCount === 0 ? ' count-pill-idle' : ''}`}
-            type="button"
-            aria-label={`${backgroundTaskCount} background task${backgroundTaskCount === 1 ? '' : 's'}`}
-            onClick={openBackgroundTasks}
-          >
-            B:{backgroundTaskCount}
-          </button>
+          {backgroundTaskCount > 0 && (
+            <button
+              id="pill-background-tasks"
+              className="background-task-pill"
+              type="button"
+              aria-label={`${backgroundTaskCount} active background job${backgroundTaskCount === 1 ? '' : 's'}`}
+              onClick={openBackgroundTasks}
+            >
+              Jobs:{backgroundTaskCount}
+            </button>
+          )}
         </div>
       </div>
-      <div className="input-wrapper" onPaste={handlePaste}>
+      <div className={inputWrapperClass} onPaste={handlePaste}>
         <AttachmentStrip attachments={attachments} onRemove={id => setAttachments(items => items.filter(item => item.id !== id))} />
         <div className="input-row">
           <button
@@ -216,7 +281,7 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
           <textarea
             id="message-input"
             ref={inputRef}
-            placeholder="Send a message..."
+            placeholder={composerPlaceholder(state.mode?.current || 'agent')}
             rows={1}
             disabled={inputDisabled}
             value={text}
@@ -237,6 +302,7 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
               void sendMessage();
             }}
           />
+          <DiagnosticIdBadge diagnosticId={diagnosticId} />
           <button id="btn-send" className="btn btn-send" disabled={!canSend} aria-label="Send" onClick={() => void sendMessage()}>
             <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />

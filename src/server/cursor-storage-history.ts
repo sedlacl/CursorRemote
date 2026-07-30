@@ -27,7 +27,24 @@ interface CursorComposerHeader {
 }
 
 interface CursorStoredComposer {
+  composerId?: string;
+  name?: string;
+  subagentComposerIds?: string[];
+  subagentInfo?: {
+    parentComposerId?: string;
+    rootParentConversationId?: string;
+  };
   fullConversationHeadersOnly?: CursorComposerHeader[];
+}
+
+export interface ComposerStorageRelation {
+  composerId: string;
+  name?: string;
+  parentComposerId?: string;
+  rootOrchestratorComposerId?: string;
+  subagentComposerIds: string[];
+  isSubagent: boolean;
+  depth: number;
 }
 
 interface CursorStoredBubble {
@@ -61,6 +78,16 @@ export function getDefaultCursorStateDbPath(): string | undefined {
 export class CursorStorageHistory {
   constructor(private readonly dbPath: string | undefined = getDefaultCursorStateDbPath()) {}
 
+  async loadComposerRelation(composerId: string): Promise<ComposerStorageRelation | null> {
+    if (!composerId || !this.dbPath || !existsSync(this.dbPath)) return null;
+    const db = await this.openDatabase();
+    try {
+      return readComposerRelationFromDb(db, composerId);
+    } finally {
+      db.close();
+    }
+  }
+
   async loadComposerHistory(composerId: string): Promise<CursorStorageHistoryResult | null> {
     if (!composerId || !this.dbPath || !existsSync(this.dbPath)) return null;
 
@@ -83,7 +110,7 @@ export class CursorStorageHistory {
         const bubble = bubbles.get(header.bubbleId);
         if (!bubble) return;
         const converted = storedBubbleToChatElement(header, bubble, index);
-        if (converted) messages.push(converted);
+        if (converted) messages.push({ ...converted, historyIndex: index });
       });
 
       return { messages, totalHeaders: headers.length, loadedBubbles: bubbles.size };
@@ -98,6 +125,46 @@ export class CursorStorageHistory {
     const DatabaseSync = (sqliteModule as unknown as { DatabaseSync: DatabaseSyncCtor }).DatabaseSync;
     return new DatabaseSync(this.dbPath!, { readOnly: true });
   }
+}
+
+function readComposerRelationFromDb(db: SqliteDatabase, composerId: string): ComposerStorageRelation | null {
+  const composerRaw = readKv(db, `composerData:${composerId}`);
+  if (!composerRaw) return null;
+  const composer = safeJsonParse<CursorStoredComposer>(composerRaw);
+  if (!composer) return null;
+
+  const parentComposerId = composer.subagentInfo?.parentComposerId?.trim() || undefined;
+  const rootOrchestratorComposerId =
+    composer.subagentInfo?.rootParentConversationId?.trim()
+    || parentComposerId
+    || composerId;
+  const isSubagent = !!parentComposerId;
+  let depth = 0;
+  if (isSubagent && parentComposerId) {
+    const visited = new Set<string>([composerId]);
+    let current = parentComposerId;
+    while (current && !visited.has(current)) {
+      visited.add(current);
+      depth += 1;
+      const parentRaw = readKv(db, `composerData:${current}`);
+      const parentComposer = parentRaw ? safeJsonParse<CursorStoredComposer>(parentRaw) : null;
+      const nextParent = parentComposer?.subagentInfo?.parentComposerId?.trim();
+      if (!nextParent) break;
+      current = nextParent;
+    }
+  }
+
+  return {
+    composerId,
+    name: typeof composer.name === 'string' ? composer.name.trim() || undefined : undefined,
+    parentComposerId,
+    rootOrchestratorComposerId,
+    subagentComposerIds: Array.isArray(composer.subagentComposerIds)
+      ? composer.subagentComposerIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [],
+    isSubagent,
+    depth,
+  };
 }
 
 function readKv(db: SqliteDatabase, key: string): string | undefined {

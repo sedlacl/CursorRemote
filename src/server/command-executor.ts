@@ -505,10 +505,30 @@ export class CommandExecutor {
     tabSource?: 'open' | 'sidebar'
   ): Promise<CommandResult> {
     return this.withRetry(commandId, async (client) => {
-      if (tabSource === 'open' || this.isComposerUuid(composerId)) {
-        await this.clickOpenComposerTab(client, composerId, tabTitle);
-        console.log(`[command-executor] Switched open tab: ${tabTitle}`);
-        return;
+      const preferOpenTab = tabSource === 'open'
+        || (tabSource !== 'sidebar' && this.isComposerUuid(composerId));
+      if (preferOpenTab) {
+        try {
+          await this.clickOpenComposerTab(client, composerId, tabTitle);
+          console.log(`[command-executor] Switched open tab: ${tabTitle}`);
+          return;
+        } catch (err) {
+          // The chat may have been closed in the editor since the last extraction.
+          const fallbackTitle = tabTitle?.trim();
+          if (!fallbackTitle) throw err;
+          const clicked = await this.clickSidebarTabByTitle(client, fallbackTitle);
+          if (!clicked) throw err;
+          console.log(`[command-executor] Switched tab via sidebar fallback: ${tabTitle}`);
+          return;
+        }
+      }
+
+      if (tabSource === 'sidebar' && this.isComposerUuid(composerId)) {
+        const clicked = await this.clickComposerInSidebar(client, composerId!);
+        if (clicked) {
+          console.log(`[command-executor] Switched sidebar tab by composer: ${tabTitle}`);
+          return;
+        }
       }
 
       if (selectorPath && tabSource !== 'sidebar') {
@@ -680,10 +700,15 @@ export class CommandExecutor {
 
   async clickAction(commandId: string, selectorPath: string): Promise<CommandResult> {
     return this.withRetry(commandId, async (client) => {
+      const questionnaireFallbacks = selectorPath.includes('questionnaire')
+        ? [
+            '.composer-questionnaire-toolbar .composer-questionnaire-toolbar-actions .composer-run-button:not([data-disabled="true"])',
+            '.composer-questionnaire-toolbar .composer-skip-button',
+          ]
+        : [];
       const strategies = [
         selectorPath,
-        '.composer-questionnaire-toolbar .composer-questionnaire-toolbar-actions .composer-run-button:not([data-disabled="true"])',
-        '.composer-questionnaire-toolbar .composer-skip-button',
+        ...questionnaireFallbacks,
       ].filter((sel, index, all) => !!sel && all.indexOf(sel) === index);
 
       let lastError: string | undefined;
@@ -697,6 +722,38 @@ export class CommandExecutor {
         }
       }
       throw new Error(lastError || 'Action element not found');
+    });
+  }
+
+  async openSubagent(commandId: string, selectorPath: string): Promise<CommandResult> {
+    return this.clickAction(commandId, selectorPath);
+  }
+
+  async stopSubagent(
+    commandId: string,
+    capabilities: import('./types.js').SubagentItemCapabilities,
+    options: { dryRun?: boolean } = {},
+  ): Promise<CommandResult> {
+    if (!capabilities.stop) {
+      throw new Error('Subagent stop descriptor is unavailable');
+    }
+    return this.withRetry(commandId, async (client) => {
+      const { buildSubagentStopResolveEvaluateScript } = await import('./subagent-stop-resolver.js');
+      const clicked = await client.evaluate(
+        buildSubagentStopResolveEvaluateScript(capabilities, { dryRun: options.dryRun }),
+      ) as { ok?: boolean; code?: string; kind?: string };
+
+      if (!clicked?.ok) {
+        const code = clicked?.code;
+        throw new Error(code === 'ambiguous'
+          ? 'Multiple matching subagent stop buttons found'
+          : code === 'invalid_kind'
+            ? 'Subagent stop kind is invalid'
+            : 'Subagent stop button not found');
+      }
+      if (!options.dryRun) {
+        console.log(`[command-executor] Stopped subagent (${capabilities.stop!.kind}): ${capabilities.matchTitle}`);
+      }
     });
   }
 

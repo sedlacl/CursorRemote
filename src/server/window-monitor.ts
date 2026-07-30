@@ -228,7 +228,7 @@ export class WindowMonitor extends EventEmitter {
       windowTitle: win.title,
       messages: state.messages,
       chatTabs: state.chatTabs,
-      pendingApprovals: state.pendingApprovals,
+      pendingApprovals: this.stateManager.getLastWindowApprovals(),
       agentStatus: state.agentStatus,
       agentActivityText: state.agentActivityText,
       agentActivityLive: state.agentActivityLive,

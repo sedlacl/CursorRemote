@@ -63,6 +63,17 @@ export function extractionFunction(
     return null;
   }
 
+  function findFirstWithin(root: Element, selectors: string[]): Element | null {
+    for (const sel of selectors) {
+      try {
+        if (root.matches(sel)) return root;
+        const el = root.querySelector(sel);
+        if (el) return el;
+      } catch { /* skip */ }
+    }
+    return null;
+  }
+
   /**
    * Line diff stats from Edit tool UI. Tries legacy classes, then +N / -M chip spans
    * (Cursor sometimes omits or renames .ui-edit-tool-call__additions / __deletions).
@@ -114,17 +125,33 @@ export function extractionFunction(
 
   /** Legacy flat-index wrappers, or virtualized composer rows (Cursor 2026+). */
   function discoverMessageWrappers(root: Element): Element[] {
-    const legacy = root.querySelectorAll('[data-flat-index]');
-    if (legacy.length > 0) return Array.from(legacy);
-
     const virtualRows = root.querySelectorAll('.virtualized-composer-messages-row');
     if (virtualRows.length > 0) {
       const wrappers: Element[] = [];
       for (const row of Array.from(virtualRows)) {
-        if (row.querySelector('[data-message-role]')) wrappers.push(row);
+        if (row.matches('[data-message-role]') || row.querySelector('[data-message-role]')) {
+          wrappers.push(row);
+          continue;
+        }
+        const transcriptRow = row.querySelector('[data-react-transcript-row-kind]');
+        const rowKind = transcriptRow?.getAttribute('data-react-transcript-row-kind');
+        const isRolelessActivity =
+          rowKind === 'activityGroup' &&
+          !!transcriptRow?.querySelector(
+            '.agent-transcript-row-activity .agent-transcript-activity-group-collapsible [data-component="collapsible-header"]',
+          );
+        const isRolelessNotification =
+          rowKind === 'notification' &&
+          !!transcriptRow?.querySelector(
+            '.agent-transcript-row-notification .agent-transcript-notification-collapsible [data-component="collapsible-header"]',
+          );
+        if (isRolelessActivity || isRolelessNotification) wrappers.push(row);
       }
       if (wrappers.length > 0) return wrappers;
     }
+
+    const legacy = root.querySelectorAll('[data-flat-index]');
+    if (legacy.length > 0) return Array.from(legacy);
 
     const rendered = root.querySelectorAll('.composer-rendered-message[data-message-role]');
     if (rendered.length > 0) return Array.from(rendered);
@@ -149,6 +176,18 @@ export function extractionFunction(
       if (Number.isFinite(parsed)) return parsed;
     }
     return 0;
+  }
+
+  function resolveTranscriptOrder(
+    wrapper: Element,
+  ): { turnIndex: number; turnOrder: number } | undefined {
+    const pairAttr = wrapper.getAttribute('data-pair-index');
+    const rowAttr = wrapper.getAttribute('data-index');
+    if (pairAttr == null || pairAttr === '' || rowAttr == null || rowAttr === '') return undefined;
+    const turnIndex = parseInt(pairAttr, 10);
+    const turnOrder = parseInt(rowAttr, 10);
+    if (!Number.isFinite(turnIndex) || !Number.isFinite(turnOrder)) return undefined;
+    return { turnIndex, turnOrder };
   }
 
   function isTranscriptMessage(el: Element): boolean {
@@ -254,6 +293,41 @@ export function extractionFunction(
         const fullHeader = (headerEl.textContent || '').replace(/\s+/g, ' ').trim();
         duration = durationFromThoughtText(fullHeader);
       }
+      return { action, detail, duration };
+    }
+
+    function parseActivityGroupHeader(headerEl: Element | null): {
+      action: string;
+      detail: string;
+      duration: string;
+    } {
+      if (!headerEl) return { action: '', detail: '', duration: '' };
+      const action = (
+        headerEl.querySelector(':scope > .ui-collapsible-action')?.textContent || ''
+      ).replace(/\s+/g, ' ').trim();
+      const detailsEl = headerEl.querySelector(':scope > .ui-collapsible-details');
+      let detail = '';
+      if (detailsEl) {
+        const expanded = detailsEl.querySelector('[data-summary-variant="expanded"]');
+        if (expanded) {
+          detail = (expanded.textContent || '').replace(/\s+/g, ' ').trim();
+        } else {
+          const clone = detailsEl.cloneNode(true) as HTMLElement;
+          clone.querySelectorAll('style, script').forEach(el => el.remove());
+          const candidates = Array.from(clone.children)
+            .map(el => (el.textContent || '').replace(/\s+/g, ' ').trim())
+            .filter(Boolean);
+          const unique = Array.from(new Set(candidates));
+          detail = unique.length === 1
+            ? unique[0]
+            : (clone.textContent || '').replace(/\s+/g, ' ').trim();
+          if (detail.length % 2 === 0) {
+            const half = detail.length / 2;
+            if (detail.slice(0, half) === detail.slice(half)) detail = detail.slice(0, half);
+          }
+        }
+      }
+      const duration = durationFromThoughtText(detail);
       return { action, detail, duration };
     }
 
@@ -988,25 +1062,66 @@ export function extractionFunction(
       const flatIndex = resolveFlatIndex(wrapper, msgEl);
       const role = msgEl.getAttribute('data-message-role');
       const kind = msgEl.getAttribute('data-message-kind');
-      const messageId = msgEl.getAttribute('data-message-id') || `fi-${flatIndex}`;
+      const transcriptRow = wrapper.querySelector('[data-react-transcript-row-kind]');
+      const transcriptRowKey = transcriptRow?.getAttribute('data-react-transcript-row-key');
+      const messageId = msgEl.getAttribute('data-message-id') ||
+        (transcriptRowKey ? `transcript:${transcriptRowKey}` : `fi-${flatIndex}`);
+      const transcriptOrder = resolveTranscriptOrder(wrapper);
+      const firstElementIndex = elements.length;
 
-      const rawEl = {
-        flatIndex,
-        role: role || undefined,
-        kind: kind || undefined,
-        messageId,
-        toolCallId: undefined as string | undefined,
-        toolStatus: undefined as string | undefined,
-        indicators: detectIndicators(wrapper),
-        textPreview: (wrapper.textContent || '').trim().substring(0, 120),
-        parsedAs: 'unknown',
-      };
-      _rawElements.push(rawEl);
+      try {
+        const rawEl = {
+          flatIndex,
+          ...transcriptOrder,
+          role: role || undefined,
+          kind: kind || undefined,
+          messageId,
+          toolCallId: undefined as string | undefined,
+          toolStatus: undefined as string | undefined,
+          indicators: detectIndicators(wrapper),
+          textPreview: (wrapper.textContent || '').trim().substring(0, 120),
+          parsedAs: 'unknown',
+        };
+        _rawElements.push(rawEl);
 
       // --- Loading indicator (skip as content — handled as agentActivity) ---
       if (wrapper.querySelector('.loading-indicator-v3')) {
         rawEl.parsedAs = 'skipped:loading';
         continue;
+      }
+
+      // --- Roleless transcript activity/progress rows ---
+      // Current Cursor virtualizes activityGroup and notification rows without
+      // data-message-role. Their transcript kind plus row-specific collapsible
+      // structure is stable; do not infer these from auxiliary-bar text.
+      if (!role && transcriptRow) {
+        const rowKind = transcriptRow.getAttribute('data-react-transcript-row-kind');
+        const collapsible = rowKind === 'activityGroup'
+          ? transcriptRow.querySelector(
+            '.agent-transcript-row-activity .agent-transcript-activity-group-collapsible.ui-step-group-collapsible',
+          )
+          : rowKind === 'notification'
+            ? transcriptRow.querySelector(
+              '.agent-transcript-row-notification .agent-transcript-notification-collapsible.ui-step-group-collapsible',
+            )
+            : null;
+        const header = collapsible?.querySelector(
+          ':scope > [data-component="collapsible-header"], :scope > .ui-collapsible-header',
+        ) ?? null;
+        const parsed = parseActivityGroupHeader(header);
+        if (parsed.action || parsed.detail || parsed.duration) {
+          elements.push({
+            type: 'thought' as const,
+            id: messageId,
+            flatIndex,
+            duration: parsed.duration,
+            action: parsed.action || undefined,
+            detail: parsed.detail || undefined,
+            thoughtKind: 'step_summary' as const,
+          });
+          rawEl.parsedAs = `roleless:${rowKind}`;
+          continue;
+        }
       }
 
       // --- Composer message group: Explored + nested ui-thinking-collapsible + tools (one flat-index) ---
@@ -1150,19 +1265,18 @@ export function extractionFunction(
         const quoteEl = inputEl?.querySelector('blockquote');
         if (inputEl && quoteEl) {
           const qt = (quoteEl.textContent || '').trim();
-          if (qt) {
-            quoted = { text: qt };
-            const clone = inputEl.cloneNode(true) as HTMLElement;
-            clone.querySelectorAll('blockquote').forEach((el) => el.remove());
-            const rest = (clone.textContent || '').trim();
-            if (rest) text = rest;
-          }
+          if (qt) quoted = { text: qt };
         }
         const mentionEls = wrapper.querySelectorAll('.mention');
         const mentions = Array.from(mentionEls).map(m => ({
           name: m.getAttribute('data-mention-name') || (m.textContent || '').trim(),
           mentionType: m.getAttribute('data-typeahead-type') || 'unknown',
         }));
+        if (inputEl && (quoteEl || mentionEls.length > 0)) {
+          const clone = inputEl.cloneNode(true) as HTMLElement;
+          clone.querySelectorAll('blockquote, .mention').forEach((el) => el.remove());
+          text = (clone.textContent || '').trim();
+        }
 
         elements.push({
           type: 'human' as const,
@@ -1178,6 +1292,29 @@ export function extractionFunction(
 
       // --- AI thinking (virtualized composer exposes as its own message row) ---
       if (role === 'ai' && kind === 'thinking') {
+        const rowKind = msgEl.getAttribute('data-react-transcript-row-kind');
+        const activityGroup = rowKind === 'activityGroup'
+          ? wrapper.querySelector('.agent-transcript-activity-group-collapsible.ui-step-group-collapsible')
+          : null;
+        if (activityGroup) {
+          const header = activityGroup.querySelector(
+            ':scope > [data-component="collapsible-header"], :scope > .ui-collapsible-header',
+          );
+          const parsed = parseActivityGroupHeader(header);
+          if (parsed.action || parsed.detail || parsed.duration) {
+            elements.push({
+              type: 'thought' as const,
+              id: messageId,
+              flatIndex,
+              duration: parsed.duration,
+              action: parsed.action || undefined,
+              detail: parsed.detail || undefined,
+              thoughtKind: 'step_summary' as const,
+            });
+          }
+          rawEl.parsedAs = 'thinking:activity-group';
+          continue;
+        }
         const thoughtCollapsible = wrapper.querySelector('.ui-thinking-collapsible');
         if (thoughtCollapsible) {
           const hdr = thoughtCollapsible.querySelector('.ui-collapsible-header');
@@ -1274,6 +1411,13 @@ export function extractionFunction(
           rawEl.parsedAs = 'thought:fallback';
         }
       }
+      } finally {
+        if (transcriptOrder) {
+          for (let i = firstElementIndex; i < elements.length; i++) {
+            Object.assign(elements[i], transcriptOrder);
+          }
+        }
+      }
     }
 
     // --- Orphan activity indicators (not inside any transcript message) ---
@@ -1312,27 +1456,111 @@ export function extractionFunction(
     };
     const cleanBtnLabel = (raw: string): string =>
       raw.replace(/\s*(Shift\+)?⏎\s*/g, '').replace(/\s+/g, ' ').trim();
+    const matchesActionPattern = (text: string, pattern: string): boolean => {
+      const normalizedPattern = pattern.replace(/\s+/g, ' ').trim();
+      if (!normalizedPattern) return false;
+      const escaped = normalizedPattern
+        .split(' ')
+        .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('\\s+');
+      return new RegExp(`(^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, 'i').test(text);
+    };
 
-    const seenCards = new Set<Element>();
-    const approvalRows = container.querySelectorAll('.ui-shell-tool-call__approval-row');
-    for (const row of Array.from(approvalRows)) {
-      const card = row.closest('.ui-tool-call-card') || row.closest('.ui-shell-tool-call');
-      if (!card || seenCards.has(card)) continue;
+    const readScopedText = (root: Element, selectors: string[], maxLen = 400): string => {
+      for (const sel of selectors) {
+        try {
+          const el = root.querySelector(sel);
+          const text = (el?.textContent || '').replace(/\s+/g, ' ').trim();
+          if (text) return text.substring(0, maxLen);
+        } catch { /* skip */ }
+      }
+      return '';
+    };
 
+    const readPolicyFromCard = (card: Element): string => {
+      const direct = readScopedText(card, ['.ui-shell-tool-call__policy'], 120);
+      if (direct) return direct;
+      for (const el of Array.from(card.querySelectorAll('.ui-tool-call-card__header span, .ui-tool-call-card__header div, .ui-shell-tool-call__header span'))) {
+        const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (/auto-review/i.test(text)) return text.substring(0, 120);
+      }
+      return '';
+    };
+
+    const readReasonFromCard = (card: Element): string => {
+      return readScopedText(card, [
+        '.ui-shell-tool-call__reason',
+        '[data-smart-mode-block-reason]',
+        '[class*="block-reason"]',
+      ], 400);
+    };
+
+    const readTitleFromCard = (card: Element, cmdText: string, descText: string): string => {
+      const headerDesc = readScopedText(card, ['.ui-tool-call-card__header .ui-shell-tool-call__description'], 200);
+      if (headerDesc && headerDesc !== cmdText) return headerDesc;
+      if (descText && descText !== cmdText) return descText;
+      const header = card.querySelector('.ui-tool-call-card__header');
+      if (header) {
+        const headerText = (header.textContent || '').replace(/\s+/g, ' ').trim();
+        const withoutCmd = cmdText ? headerText.replace(cmdText, '').trim() : headerText;
+        const withoutPolicy = withoutCmd.replace(/auto-review/gi, '').trim();
+        if (withoutPolicy && withoutPolicy.length > 3 && !/^run$/i.test(withoutPolicy)) {
+          return withoutPolicy.substring(0, 200);
+        }
+      }
+      return '';
+    };
+
+    const buildApprovalFromCard = (
+      card: Element,
+      row: Element | null,
+      actions: CursorState['pendingApprovals'][0]['actions'],
+    ): CursorState['pendingApprovals'][0] | null => {
+      const cmdEl = card.querySelector('.ui-shell-tool-call__command');
+      const cmdText = (cmdEl?.textContent || '')
+        .trim()
+        .replace(/^\$\s*/, '')
+        .replace(/\s+/g, ' ')
+        .substring(0, 240);
+      const descEl = card.querySelector('.ui-shell-tool-call__description');
+      const descText = (descEl?.textContent || '').trim().substring(0, 200);
+      const title = readTitleFromCard(card, cmdText, descText);
+      const reason = readReasonFromCard(card);
+      const mode = readPolicyFromCard(card);
+      const composerId =
+        card.closest('[data-composer-id]')?.getAttribute('data-composer-id')
+        || containerComposerId
+        || '';
+      const description = title || cmdText || descText || 'Pending approval';
+      if (isBackgroundApprovalLabel(description)) return null;
+      if (!actions.some((a) => a.type === 'approve')) return null;
+
+      const bubble = card.closest('[data-tool-call-id]');
+      const toolCallId = bubble?.getAttribute('data-tool-call-id') || buildSelectorPath(card);
+      return {
+        id: `tool:${toolCallId}`,
+        description,
+        title: title || undefined,
+        command: cmdText || undefined,
+        reason: reason || undefined,
+        mode: mode || undefined,
+        composerId: composerId || undefined,
+        actions,
+      };
+    };
+
+    const collectRowActions = (row: Element): CursorState['pendingApprovals'][0]['actions'] => {
       const actions: CursorState['pendingApprovals'][0]['actions'] = [];
-
-      const cardText = (card.textContent || '').replace(/\s+/g, ' ').trim();
-      if (isBackgroundApprovalLabel(cardText)) continue;
-
       const runBtn = row.querySelector('button.ui-shell-tool-call__run-btn');
       if (runBtn && !isMenuTrigger(runBtn)) {
         const runLabel = cleanBtnLabel(getButtonLabel(runBtn));
-        if (!runLabel || isBackgroundApprovalLabel(runLabel) || !looksLikeButtonLabel(runLabel)) continue;
-        actions.push({
-          label: runLabel,
-          type: 'approve',
-          selectorPath: buildSelectorPath(runBtn),
-        });
+        if (runLabel && !isBackgroundApprovalLabel(runLabel) && looksLikeButtonLabel(runLabel)) {
+          actions.push({
+            label: runLabel,
+            type: 'approve',
+            selectorPath: buildSelectorPath(runBtn),
+          });
+        }
       }
       const allowlistBtn = row.querySelector('button.ui-shell-tool-call__allowlist-button');
       if (allowlistBtn && !isMenuTrigger(allowlistBtn)) {
@@ -1354,35 +1582,28 @@ export function extractionFunction(
           });
         }
       }
+      return actions;
+    };
 
-      if (!actions.some((a) => a.type === 'approve')) continue;
+    const seenCards = new Set<Element>();
+    const approvalRows = container.querySelectorAll('.ui-shell-tool-call__approval-row');
+    for (const row of Array.from(approvalRows)) {
+      const card = row.closest('.ui-tool-call-card') || row.closest('.ui-shell-tool-call');
+      if (!card || seenCards.has(card)) continue;
+
+      const cardText = (card.textContent || '').replace(/\s+/g, ' ').trim();
+      if (isBackgroundApprovalLabel(cardText)) continue;
+
+      const actions = collectRowActions(row);
+      const entry = buildApprovalFromCard(card, row, actions);
+      if (!entry) continue;
       seenCards.add(card);
-
-      const cmdEl = card.querySelector('.ui-shell-tool-call__command');
-      const cmdText = (cmdEl?.textContent || '')
-        .trim()
-        .replace(/^\$\s*/, '')
-        .replace(/\s+/g, ' ')
-        .substring(0, 240);
-      const descEl = card.querySelector('.ui-shell-tool-call__description');
-      const descText = (descEl?.textContent || '').trim().substring(0, 200);
-      const description = cmdText || descText || 'Pending approval';
-      if (isBackgroundApprovalLabel(description)) continue;
-
-      // Stable per-card id — Cursor's tool-call id when available, falling
-      // back to selector path. Keeps the entry consistent across polls.
-      const bubble = card.closest('[data-tool-call-id]');
-      const toolCallId = bubble?.getAttribute('data-tool-call-id') || buildSelectorPath(card);
-      pendingApprovals.push({
-        id: `tool:${toolCallId}`,
-        description,
-        actions,
-      });
+      pendingApprovals.push(entry);
     }
 
     if (pendingApprovals.length === 0) {
-      const approveButtons: { label: string; selector: string }[] = [];
-      const rejectButtons: { label: string; selector: string }[] = [];
+      const approveButtons: { label: string; selector: string; el: Element }[] = [];
+      const rejectButtons: { label: string; selector: string; el: Element }[] = [];
       const seenApproveBtns = new Set<Element>();
       const seenRejectBtns = new Set<Element>();
 
@@ -1398,7 +1619,7 @@ export function extractionFunction(
               looksLikeButtonLabel(label)
             ) {
               seenApproveBtns.add(btn);
-              approveButtons.push({ label, selector: buildSelectorPath(btn) });
+              approveButtons.push({ label, selector: buildSelectorPath(btn), el: btn });
             }
           }
         } catch { /* skip */ }
@@ -1409,7 +1630,7 @@ export function extractionFunction(
           const text = `${getButtonLabel(btn)} ${btn.getAttribute('aria-label') || ''}`.toLowerCase();
           if (isBackgroundApprovalLabel(text)) continue;
           for (const pat of approveTextMatch) {
-            if (text.includes(pat.toLowerCase())) {
+            if (matchesActionPattern(text, pat)) {
               const label = getButtonLabel(btn) || pat;
               if (
                 isBackgroundApprovalLabel(label) ||
@@ -1419,7 +1640,7 @@ export function extractionFunction(
                 break;
               }
               seenApproveBtns.add(btn);
-              approveButtons.push({ label, selector: buildSelectorPath(btn) });
+              approveButtons.push({ label, selector: buildSelectorPath(btn), el: btn });
               break;
             }
           }
@@ -1434,7 +1655,7 @@ export function extractionFunction(
             const label = getButtonLabel(btn);
             if (label && !isGarbageActionLabel(label)) {
               seenRejectBtns.add(btn);
-              rejectButtons.push({ label, selector: buildSelectorPath(btn) });
+              rejectButtons.push({ label, selector: buildSelectorPath(btn), el: btn });
             }
           }
         } catch { /* skip */ }
@@ -1444,11 +1665,11 @@ export function extractionFunction(
           if (seenRejectBtns.has(btn) || isMenuTrigger(btn)) continue;
           const text = `${getButtonLabel(btn)} ${btn.getAttribute('aria-label') || ''}`.toLowerCase();
           for (const pat of rejectTextMatch) {
-            if (text.includes(pat.toLowerCase())) {
+            if (matchesActionPattern(text, pat)) {
               const label = getButtonLabel(btn) || pat;
               if (isGarbageActionLabel(label)) break;
               seenRejectBtns.add(btn);
-              rejectButtons.push({ label, selector: buildSelectorPath(btn) });
+              rejectButtons.push({ label, selector: buildSelectorPath(btn), el: btn });
               break;
             }
           }
@@ -1456,27 +1677,305 @@ export function extractionFunction(
       }
 
       if (approveButtons.length > 0) {
-        const actions: CursorState['pendingApprovals'][0]['actions'] = [];
+        const cardByBtn = new Map<Element, { approve: typeof approveButtons; reject: typeof rejectButtons }>();
         for (const btn of approveButtons) {
-          actions.push({
+          const card = btn.el.closest('.ui-tool-call-card') || btn.el.closest('.ui-shell-tool-call');
+          if (!card || seenCards.has(card)) continue;
+          const bucket = cardByBtn.get(card) ?? { approve: [], reject: [] };
+          bucket.approve.push(btn);
+          cardByBtn.set(card, bucket);
+        }
+        for (const btn of rejectButtons) {
+          const card = btn.el.closest('.ui-tool-call-card') || btn.el.closest('.ui-shell-tool-call');
+          if (!card || seenCards.has(card)) continue;
+          const bucket = cardByBtn.get(card) ?? { approve: [], reject: [] };
+          bucket.reject.push(btn);
+          cardByBtn.set(card, bucket);
+        }
+
+        for (const [card, bucket] of cardByBtn) {
+          if (bucket.approve.length === 0) continue;
+          const actions: CursorState['pendingApprovals'][0]['actions'] = [];
+          for (const btn of bucket.approve) {
+            actions.push({
+              label: btn.label,
+              type: btn.label.toLowerCase().includes('all') ? 'approve_all' : 'approve',
+              selectorPath: btn.selector,
+            });
+          }
+          for (const btn of bucket.reject) {
+            actions.push({ label: btn.label, type: 'reject', selectorPath: btn.selector });
+          }
+          const row = card.querySelector('.ui-shell-tool-call__approval-row');
+          const entry = buildApprovalFromCard(card, row, actions);
+          if (!entry) continue;
+          if (!entry.command && !entry.title && /^run$/i.test(entry.description)) continue;
+          seenCards.add(card);
+          pendingApprovals.push(entry);
+        }
+
+        const usedApprove = new Set<Element>();
+        for (const bucket of cardByBtn.values()) {
+          for (const btn of bucket.approve) usedApprove.add(btn.el);
+        }
+        for (const btn of approveButtons) {
+          if (usedApprove.has(btn.el)) continue;
+          if (/^run$/i.test(btn.label.trim())) continue;
+          const actions: CursorState['pendingApprovals'][0]['actions'] = [{
             label: btn.label,
             type: btn.label.toLowerCase().includes('all') ? 'approve_all' : 'approve',
             selectorPath: btn.selector,
+          }];
+          for (const rej of rejectButtons) {
+            if (rej.el.closest('.ui-tool-call-card') || rej.el.closest('.ui-shell-tool-call')) continue;
+            actions.push({ label: rej.label, type: 'reject', selectorPath: rej.selector });
+          }
+          pendingApprovals.push({
+            id: `legacy:${btn.selector}`,
+            description: btn.label,
+            composerId: containerComposerId || undefined,
+            actions,
           });
         }
-        for (const btn of rejectButtons) {
-          actions.push({ label: btn.label, type: 'reject', selectorPath: btn.selector });
-        }
-        const idParts = approveButtons.map(b => b.label).join(',') + '|' + rejectButtons.map(b => b.label).join(',');
-        pendingApprovals.push({
-          id: idParts,
-          description: approveButtons[0]?.label || 'Pending approval',
-          actions,
-        });
       }
     }
 
     const actionableApprovals = pendingApprovals.filter((entry) => isActionableApproval(entry));
+
+    // --- Cursor Multitask subagents (separate from background terminals/tools) ---
+    const subagentItems: CursorState['subagents']['items'] = [];
+    const subagentKeys = new Set<string>();
+    const multitaskToolbar =
+      container.querySelector('#composer-toolbar-section')
+      || document.querySelector('#composer-toolbar-section');
+    const subagentSummaryRe = /^(\d+)\s+subagents?\s+running$/i;
+    let subagentSummary = '';
+    let subagentSummaryCount = 0;
+    let subagentToolbarExpandPath: string | undefined;
+    const hasSubagentChevron = (row: Element): boolean =>
+      !!row.querySelector(
+        '.codicon-chevron-right, .codicon-chevron-down, i[data-icon-name="chevron-right"], i[data-icon-name="chevron-down"]',
+      );
+    if (multitaskToolbar) {
+      for (const el of Array.from(multitaskToolbar.querySelectorAll('div, span'))) {
+        const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        const match = text.match(subagentSummaryRe);
+        if (!match) continue;
+        if (Array.from(el.children).some(child => subagentSummaryRe.test((child.textContent || '').replace(/\s+/g, ' ').trim()))) {
+          continue;
+        }
+        subagentSummary = text;
+        subagentSummaryCount = Math.max(subagentSummaryCount, parseInt(match[1], 10));
+        const expandRow =
+          el.closest('.composer-toolbar-section-header')
+          || el.closest('.composer-toolbar-background-job-item-clickable')
+          || el.closest('[style*="cursor: pointer"]')
+          || el.parentElement;
+        if (expandRow && hasSubagentChevron(expandRow)) {
+          subagentToolbarExpandPath = buildSelectorPath(expandRow);
+        }
+      }
+    }
+
+    const findToolbarStopDescriptor = (title: string, model?: string) => {
+      if (!multitaskToolbar) return undefined;
+      const normTitle = title.replace(/\s+/g, ' ').trim().toLowerCase();
+      let sawMatch = false;
+      for (const job of Array.from(multitaskToolbar.querySelectorAll('.composer-toolbar-background-job-item'))) {
+        if (job.querySelector('.composer-toolbar-background-job-shell-icon, .codicon-terminal')) continue;
+        const jobTitle = (
+          job.querySelector('.composer-toolbar-background-job-item-text')?.textContent
+          || job.textContent?.replace(/\bStop\b/gi, '')
+          || ''
+        ).replace(/\s+/g, ' ').trim();
+        if (!jobTitle || jobTitle.toLowerCase() !== normTitle) continue;
+        const stopEl = job.querySelector('.composer-toolbar-background-job-item-stop[data-click-ready="true"]');
+        if (!stopEl) continue;
+        sawMatch = true;
+      }
+      if (!sawMatch) return undefined;
+      return {
+        kind: 'toolbarStop' as const,
+        matchTitle: title.replace(/\s+/g, ' ').trim(),
+        ...(model ? { matchModel: model.replace(/\s+/g, ' ').trim() } : {}),
+      };
+    };
+
+    const normalizeDomId = (value: string | null | undefined): string | undefined => {
+      const normalized = (value || '').replace(/\s+/g, ' ').trim();
+      return normalized || undefined;
+    };
+
+    const readSubagentCardStopIdentity = (card: Element): {
+      toolCallId?: string;
+      messageId?: string;
+      composerId?: string;
+    } => {
+      const row = card.closest('[data-tool-call-id], [data-message-id]');
+      const composerEl =
+        card.closest('[data-composer-id]')
+        || container.closest('[data-composer-id]')
+        || document.querySelector('#container[data-composer-id]');
+      return {
+        toolCallId: normalizeDomId(row?.getAttribute('data-tool-call-id')),
+        messageId: normalizeDomId(row?.getAttribute('data-message-id')),
+        composerId: normalizeDomId(composerEl?.getAttribute('data-composer-id')),
+      };
+    };
+
+    const addSubagent = (
+      title: string,
+      model: string | undefined,
+      status: CursorState['subagents']['items'][number]['status'],
+      statusText?: string,
+      capabilities?: {
+        openSelectorPath?: string;
+        toolbarExpandSelectorPath?: string;
+        stop?: NonNullable<CursorState['subagents']['items'][number]['_capabilities']>['stop'];
+      },
+    ): void => {
+      const cleanTitle = title.replace(/\s+/g, ' ').trim().substring(0, 160);
+      if (!cleanTitle) return;
+      const cleanModel = model?.replace(/\s+/g, ' ').trim().substring(0, 80) || undefined;
+      const key = `${cleanTitle.toLowerCase()}|${(cleanModel || '').toLowerCase()}`;
+      const openSelectorPath = capabilities?.openSelectorPath;
+      const incomingStop = capabilities?.stop ?? findToolbarStopDescriptor(cleanTitle, cleanModel);
+      const toolbarExpandSelectorPath = capabilities?.toolbarExpandSelectorPath ?? subagentToolbarExpandPath;
+      const openAvailable = !!openSelectorPath;
+      const stopAvailable = !!incomingStop;
+      const existing = subagentItems.find(item => item.id === `subagent:${key}`);
+      if (existing) {
+        if (status === 'running') existing.status = 'running';
+        if (!existing.statusText && statusText) existing.statusText = statusText;
+        existing.openAvailable = existing.openAvailable || openAvailable;
+        existing.stopAvailable = existing.stopAvailable || stopAvailable;
+        const prevCaps = existing._capabilities;
+        existing._capabilities = {
+          matchTitle: cleanTitle,
+          ...(cleanModel ? { matchModel: cleanModel } : {}),
+          openSelectorPath: prevCaps?.openSelectorPath || openSelectorPath,
+          toolbarExpandSelectorPath: prevCaps?.toolbarExpandSelectorPath || toolbarExpandSelectorPath,
+          stop: prevCaps?.stop || incomingStop,
+        };
+        return;
+      }
+      subagentKeys.add(cleanTitle.toLowerCase());
+      subagentItems.push({
+        id: `subagent:${key}`,
+        title: cleanTitle,
+        ...(cleanModel ? { model: cleanModel } : {}),
+        status,
+        ...(statusText ? { statusText: statusText.substring(0, 120) } : {}),
+        openAvailable,
+        stopAvailable,
+        _capabilities: {
+          matchTitle: cleanTitle,
+          ...(cleanModel ? { matchModel: cleanModel } : {}),
+          ...(openSelectorPath ? { openSelectorPath } : {}),
+          ...(toolbarExpandSelectorPath ? { toolbarExpandSelectorPath } : {}),
+          ...(incomingStop ? { stop: incomingStop } : {}),
+        },
+      });
+    };
+
+    for (const card of Array.from(container.querySelectorAll('.subagent-task-card[data-chrome="card"]'))) {
+      const titleEl = card.querySelector('.subagent-task-card-title[title]');
+      const title = titleEl?.getAttribute('title') || titleEl?.textContent || '';
+      const model = card.querySelector('.task-subagent-model-hover-trigger')?.textContent || undefined;
+      const running = !!card.querySelector('.ui-subagent-status-indicator--running-loader');
+      const statusText = (card.querySelector('[data-shimmer="true"]')?.textContent || '').replace(/\s+/g, ' ').trim();
+      const cardStopEl = card.querySelector('.task-subagent-header-pill-button--stop');
+      const cleanTitle = title.replace(/\s+/g, ' ').trim();
+      const cleanModel = model?.replace(/\s+/g, ' ').trim();
+      let status: CursorState['subagents']['items'][number]['status'] = 'unknown';
+      if (running) status = 'running';
+      else if (/\b(error|failed)\b/i.test(statusText)) status = 'error';
+      else if (/\b(waiting|blocked)\b/i.test(statusText)) status = 'waiting';
+      else if (/\b(done|complete(?:d)?|finished)\b/i.test(statusText)) status = 'completed';
+      addSubagent(title, model, status, statusText || undefined, {
+        openSelectorPath: title ? buildSelectorPath(card) : undefined,
+        stop: cardStopEl ? {
+          kind: 'cardStop',
+          matchTitle: cleanTitle,
+          ...(cleanModel ? { matchModel: cleanModel } : {}),
+          ...readSubagentCardStopIdentity(card),
+        } : undefined,
+      });
+    }
+
+    if (multitaskToolbar && subagentSummaryCount > 0) {
+      for (const job of Array.from(multitaskToolbar.querySelectorAll('.composer-toolbar-background-job-item'))) {
+        if (job.querySelector('.composer-toolbar-background-job-shell-icon, .codicon-terminal')) continue;
+        const title = (
+          job.querySelector('.composer-toolbar-background-job-item-text')?.textContent
+          || job.textContent?.replace(/\bStop\b/gi, '')
+          || ''
+        ).replace(/\s+/g, ' ').trim();
+        if (!title) continue;
+        const stopEl = job.querySelector('.composer-toolbar-background-job-item-stop[data-click-ready="true"]');
+        addSubagent(title, undefined, 'running', 'Running', {
+          stop: stopEl ? { kind: 'toolbarStop', matchTitle: title } : undefined,
+          toolbarExpandSelectorPath: subagentToolbarExpandPath,
+        });
+      }
+    }
+
+    if (subagentSummaryCount === 1 && subagentToolbarExpandPath) {
+      const runningItems = subagentItems.filter(item => item.status === 'running');
+      if (runningItems.length === 0) {
+        addSubagent('Running subagent', undefined, 'running', subagentSummary || undefined, {
+          toolbarExpandSelectorPath: subagentToolbarExpandPath,
+          stop: { kind: 'singleJobAfterExpand', matchTitle: 'Running subagent' },
+        });
+      } else if (runningItems.length === 1 && !runningItems[0]!.stopAvailable) {
+        const item = runningItems[0]!;
+        item.stopAvailable = true;
+        item._capabilities = {
+          matchTitle: item._capabilities?.matchTitle || item.title,
+          ...(item._capabilities?.matchModel ? { matchModel: item._capabilities.matchModel } : {}),
+          ...(item._capabilities?.openSelectorPath ? { openSelectorPath: item._capabilities.openSelectorPath } : {}),
+          toolbarExpandSelectorPath: item._capabilities?.toolbarExpandSelectorPath || subagentToolbarExpandPath,
+          stop: item._capabilities?.stop || { kind: 'singleJobAfterExpand', matchTitle: item.title },
+        };
+      }
+    }
+
+    const runningSubagentItems = subagentItems.filter(item => item.status === 'running').length;
+    const runningCount = Math.max(subagentSummaryCount, runningSubagentItems);
+    if (!subagentSummary && runningCount > 0) {
+      subagentSummary = `${runningCount} subagent${runningCount === 1 ? '' : 's'} running`;
+    }
+    const subagents: CursorState['subagents'] = {
+      runningCount,
+      summary: subagentSummary,
+      items: subagentItems,
+    };
+
+    // --- Agent-authored file changes (not extension Git status) ---
+    let fileCount = 0;
+    let reviewEl: Element | null = null;
+    let undoAllEl: Element | null = null;
+    if (multitaskToolbar) {
+      for (const el of Array.from(multitaskToolbar.querySelectorAll('div, span'))) {
+        const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        const fileMatch = text.match(/^(\d+)\s+Files?$/i);
+        if (fileMatch && !Array.from(el.children).some(child => /^\d+\s+Files?$/i.test((child.textContent || '').trim()))) {
+          fileCount = Math.max(fileCount, parseInt(fileMatch[1], 10));
+        }
+      }
+      for (const action of Array.from(multitaskToolbar.querySelectorAll('div[data-click-ready="true"]'))) {
+        const label = (action.textContent || '').replace(/\s+/g, ' ').trim();
+        if (/^Review$/i.test(label)) reviewEl = action;
+        else if (/^Undo All$/i.test(label)) undoAllEl = action;
+      }
+    }
+    const agentChanges: CursorState['agentChanges'] = {
+      fileCount,
+      reviewAvailable: reviewEl !== null,
+      undoAllAvailable: undoAllEl !== null,
+      ...(reviewEl ? { reviewSelectorPath: buildSelectorPath(reviewEl) } : {}),
+      ...(undoAllEl ? { undoAllSelectorPath: buildSelectorPath(undoAllEl) } : {}),
+    };
 
     // --- Background task / terminal extraction ---
     const backgroundTasks: CursorState['backgroundTasks'] = [];
@@ -1550,6 +2049,14 @@ export function extractionFunction(
 
     const toolbarBackgroundJobs = document.querySelectorAll('.composer-toolbar-background-job-item');
     for (const job of Array.from(toolbarBackgroundJobs)) {
+      const jobTitle = cleanTaskText(
+        job.querySelector('.composer-toolbar-background-job-item-text')?.textContent || '',
+      ).toLowerCase();
+      const looksLikeSubagent =
+        subagentSummaryCount > 0
+        && !job.querySelector('.composer-toolbar-background-job-shell-icon, .codicon-terminal')
+        && (subagentKeys.size === 0 || subagentKeys.has(jobTitle));
+      if (looksLikeSubagent) continue;
       const stopEl = job.querySelector('.composer-toolbar-background-job-item-stop, [class*="background-job"][class*="stop"]');
       if (!stopEl) continue;
       const label = cleanTaskText(
@@ -1680,18 +2187,28 @@ export function extractionFunction(
     const agentStopAvailable = agentStopSource !== 'none';
 
     // --- Agent status ---
-    const statusEl = findFirst(statusSelectors);
+    const statusEl = findFirstWithin(container, statusSelectors);
     let agentStatus: CursorState['agentStatus'] = 'idle';
     if (statusEl) {
-      const combined = `${(statusEl.textContent || '').toLowerCase()} ${statusEl.classList.toString().toLowerCase()}`;
-      if (combined.includes('think')) agentStatus = 'thinking';
+      const statusText = (statusEl.textContent || '').toLowerCase();
+      const combined = `${statusText} ${statusEl.classList.toString().toLowerCase()}`;
+      if (combined.includes('error') || combined.includes('fail')) agentStatus = 'error';
+      else if (/\b(approv|confirm|permission|allow)\w*/.test(statusText)) agentStatus = 'waiting_approval';
+      else if (/\b(question|choose|select an option)\b/.test(statusText)) agentStatus = 'waiting_question';
+      else if (/\b(waiting|input required|action required)\b/.test(statusText)) agentStatus = 'waiting_user_input';
+      else if (combined.includes('think')) agentStatus = 'thinking';
       else if (combined.includes('generat')) agentStatus = 'generating';
       else if (combined.includes('running') || combined.includes('execut')) agentStatus = 'running_tool';
-      else if (combined.includes('approv') || combined.includes('wait')) agentStatus = 'waiting_approval';
-      else if (combined.includes('error') || combined.includes('fail')) agentStatus = 'error';
     }
     if (actionableApprovals.length > 0) agentStatus = 'waiting_approval';
     if (agentStatus === 'idle' && agentStopSelectorPath) {
+      agentStatus = 'generating';
+    }
+    const composerStatusEl =
+      container.closest('[data-composer-status]')
+      || container.querySelector('[data-composer-status]');
+    const composerStatus = composerStatusEl?.getAttribute('data-composer-status')?.toLowerCase() || '';
+    if (agentStatus === 'idle' && /running|generating|loading|thinking/.test(composerStatus)) {
       agentStatus = 'generating';
     }
 
@@ -1700,6 +2217,27 @@ export function extractionFunction(
     // Shimmer + .loading-indicator-v3 (checked below) are the ground truth.
 
     const inputEl = findFirst(inputSelectors);
+    const composerBarRoot =
+      container.closest('.composer-bar')
+      || container.querySelector('.composer-bar')
+      || (container.matches?.('.composer-bar') ? container : null);
+    const auxiliaryBar = document.querySelector('#workbench\\.parts\\.auxiliarybar');
+    const composerInputSelectors = inputSelectors.filter((sel) =>
+      sel.includes('composer-bar') || sel.includes('auxiliarybar'),
+    );
+    let composerInputEl: Element | null = null;
+    if (composerBarRoot) {
+      composerInputEl = findFirstWithin(
+        composerBarRoot,
+        composerInputSelectors.length > 0 ? composerInputSelectors : inputSelectors,
+      );
+    } else if (auxiliaryBar) {
+      composerInputEl = findFirstWithin(
+        auxiliaryBar,
+        composerInputSelectors.length > 0 ? composerInputSelectors : inputSelectors,
+      );
+    }
+    const composerInputAvailable = composerInputEl !== null;
 
     // --- Chat tabs from agent sidebar/history cells ---
     const chatTabs: ChatTab[] = [];
@@ -1959,12 +2497,22 @@ export function extractionFunction(
     if (modeEl) {
       currentMode = modeEl.getAttribute('data-mode') || 'agent';
     }
+    if (currentMode === 'agent') {
+      const modeCarrier =
+        container.closest('[data-mode]')
+        || Array.from(container.querySelectorAll('[data-mode]')).find((el) =>
+          /^(agent|plan|debug|multitask|chat|ask)$/.test(el.getAttribute('data-mode') || ''),
+        );
+      if (modeCarrier) currentMode = modeCarrier.getAttribute('data-mode') || currentMode;
+    }
+    if (currentMode === 'ask') currentMode = 'chat';
     const mode: ModeInfo = {
       current: currentMode,
       available: [
         { id: 'agent', label: 'Agent', icon: 'infinity' },
         { id: 'plan', label: 'Plan', icon: 'todos' },
         { id: 'debug', label: 'Debug', icon: 'bug' },
+        { id: 'multitask', label: 'Multitask', icon: 'layers' },
         { id: 'chat', label: 'Ask', icon: 'chat' },
       ],
     };
@@ -2174,6 +2722,22 @@ export function extractionFunction(
       };
     }
 
+    // Priority: actionable user interaction, Multitask workers, parent composer,
+    // then completed/idle. A completed parent is not authoritative while any
+    // extracted or toolbar-reported subagent remains active.
+    if (questionnaire) {
+      agentStatus = 'waiting_question';
+    } else if (actionableApprovals.length > 0) {
+      agentStatus = 'waiting_approval';
+    } else if (
+      agentStatus !== 'waiting_approval'
+      && agentStatus !== 'waiting_question'
+      && agentStatus !== 'waiting_user_input'
+      && subagents.runningCount > 0
+    ) {
+      agentStatus = 'running_subagents';
+    }
+
     return {
       connected: true,
       extractorStatus: 'ok',
@@ -2186,7 +2750,10 @@ export function extractionFunction(
       agentActivitySource: 'none',
       messages: elements,
       pendingApprovals: actionableApprovals,
+      globalApprovalNotifications: [],
       inputAvailable: inputEl !== null,
+      composerInputAvailable,
+      activeConversationContext: null,
       chatTabs,
       activeComposerId: containerComposerId || (chatTabs.find((t) => t.isActive)?.composerId ?? ''),
       mode,
@@ -2196,6 +2763,8 @@ export function extractionFunction(
       composerQueue: { items: queueItems, ...(queueLabel ? { queueLabel } : {}) },
       questionnaire,
       backgroundTasks,
+      subagents,
+      agentChanges,
       gitStatus: null,
       gitScm: null,
       agentStopSelectorPath,

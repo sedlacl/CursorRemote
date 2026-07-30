@@ -1,12 +1,19 @@
 import { EventEmitter } from 'events';
-import type { ChatElement, CursorState, CursorWindow } from './types.js';
+import type { ChatElement, CursorState, CursorWindow, Approval, GlobalApprovalNotification } from './types.js';
 import type { GitSnapshotPushPayload, GitStatusInfo, GitWindowSnapshot } from '../shared/extension-bridge.js';
 import type { GitScmSnapshot } from '../shared/git-scm.js';
 import type { GitSnapshotStoreDiagnostics } from '../shared/diagnostics.js';
 import { AGENT_ACTIVITY_STALE_MS, BACKGROUND_TASKS_STALE_MS } from './activity-stale.js';
 import { filterActionableApprovals } from './approval-filter.js';
+import {
+  enrichActiveWindowApprovals,
+  filterContextLocalApprovals,
+  type ResolvedApprovalTarget,
+} from './approval-registry.js';
 import { mergeMessages } from './message-history.js';
 import { getHistoryScopeKey } from '../shared/history-scope.js';
+import { ConversationRelationRegistry } from './conversation-relation-registry.js';
+import { buildActiveConversationContext } from './conversation-context.js';
 
 export function findGitSnapshotForTitle(
   windowTitle: string,
@@ -59,7 +66,10 @@ function emptyState(): CursorState {
     agentActivitySource: 'none',
     messages: [],
     pendingApprovals: [],
+    globalApprovalNotifications: [],
     inputAvailable: false,
+    composerInputAvailable: false,
+    activeConversationContext: null,
     chatTabs: [],
     activeComposerId: '',
     mode: { current: 'agent', available: [] },
@@ -69,6 +79,12 @@ function emptyState(): CursorState {
     composerQueue: { items: [] },
     questionnaire: null,
     backgroundTasks: [],
+    subagents: { runningCount: 0, summary: '', items: [] },
+    agentChanges: {
+      fileCount: 0,
+      reviewAvailable: false,
+      undoAllAvailable: false,
+    },
     gitStatus: null,
     gitScm: null,
     agentStopSelectorPath: '',
@@ -103,6 +119,46 @@ export class StateManager extends EventEmitter {
   private activeGitWindowKey: string | null = null;
   private lastGitPushAt: number | null = null;
   private lastGitPushWindowKey: string | null = null;
+  private approvalRegistry = new Map<string, ResolvedApprovalTarget>();
+  private lastWindowApprovals: Approval[] = [];
+  private readonly conversationRegistry = new ConversationRelationRegistry();
+
+  getConversationRegistry(): ConversationRelationRegistry {
+    return this.conversationRegistry;
+  }
+
+  refreshConversationContextPatch(): void {
+    const context = buildActiveConversationContext(this.currentState, this.conversationRegistry);
+    const prev = this.currentState.activeConversationContext;
+    if (JSON.stringify(prev) === JSON.stringify(context)) return;
+    this.currentState = {
+      ...this.currentState,
+      activeConversationContext: context,
+    };
+    this.emit('state:patch', { activeConversationContext: context });
+  }
+
+  getLastWindowApprovals(): Approval[] {
+    return this.lastWindowApprovals;
+  }
+
+  getApprovalRegistry(): ReadonlyMap<string, ResolvedApprovalTarget> {
+    return this.approvalRegistry;
+  }
+
+  setGlobalApprovals(
+    notifications: GlobalApprovalNotification[],
+    registry: Map<string, ResolvedApprovalTarget>,
+  ): void {
+    this.approvalRegistry = new Map(registry);
+    const prev = this.currentState.globalApprovalNotifications ?? [];
+    if (JSON.stringify(prev) === JSON.stringify(notifications)) return;
+    this.currentState = {
+      ...this.currentState,
+      globalApprovalNotifications: notifications,
+    };
+    this.emit('state:patch', { globalApprovalNotifications: notifications });
+  }
 
   get generation(): number {
     return this._generation;
@@ -166,23 +222,53 @@ export class StateManager extends EventEmitter {
     newState.activeWindowId = this.currentState.activeWindowId;
     newState.gitStatus = this.currentState.gitStatus;
     newState.gitScm = this.currentState.gitScm;
+    newState.subagents ??= { runningCount: 0, summary: '', items: [] };
+    newState.agentChanges ??= {
+      fileCount: 0,
+      reviewAvailable: false,
+      undoAllAvailable: false,
+    };
     newState.pendingApprovals = filterActionableApprovals(newState.pendingApprovals);
-    if (newState.pendingApprovals.length === 0 && newState.agentStatus === 'waiting_approval') {
-      newState.agentStatus = 'idle';
-    }
+    const activeWindow = newState.windows.find((w) => w.id === newState.activeWindowId);
+    const enrichedApprovals = enrichActiveWindowApprovals(
+      newState.pendingApprovals,
+      newState.activeWindowId,
+      activeWindow?.title ?? '',
+      newState.activeComposerId,
+      newState.chatTabs,
+    );
+    this.lastWindowApprovals = enrichedApprovals;
 
     const historyScope = getHistoryScopeKey(newState);
     const scopeChanged = historyScope !== this.historyScope;
     if (scopeChanged) {
       this.historyScope = historyScope;
       this.messageHistory = newState.messages.slice();
+      newState.pendingApprovals = filterContextLocalApprovals(
+        enrichedApprovals,
+        newState.activeWindowId,
+        newState.activeComposerId,
+      );
     } else {
+      newState.pendingApprovals = filterContextLocalApprovals(
+        enrichedApprovals,
+        newState.activeWindowId,
+        newState.activeComposerId,
+      );
+    }
+
+    if (newState.pendingApprovals.length === 0 && newState.agentStatus === 'waiting_approval') {
+      newState.agentStatus = newState.questionnaire ? 'waiting_question' : 'idle';
+    }
+
+    if (!scopeChanged) {
       this.messageHistory = mergeMessages(this.messageHistory, newState.messages);
     }
     newState.messages = this.messageHistory;
+    newState.globalApprovalNotifications = this.currentState.globalApprovalNotifications ?? [];
 
     const stateForApply = this.applyBackgroundTaskStaleness(
-      this.applyActivityStaleness(newState),
+      this.applyActivityStaleness(this.enrichConversationContext(newState)),
     );
 
     const patch = this.diff(this.currentState, stateForApply);
@@ -216,12 +302,27 @@ export class StateManager extends EventEmitter {
     this.schedulePatch(patch);
   }
 
+  private enrichConversationContext(newState: CursorState): CursorState {
+    newState.composerInputAvailable = newState.composerInputAvailable ?? newState.inputAvailable;
+    return {
+      ...newState,
+      activeConversationContext: buildActiveConversationContext(newState, this.conversationRegistry),
+    };
+  }
+
   /**
    * Drop `agentActivityText` after AGENT_ACTIVITY_STALE_MS with no text change
    * (same semantics as Telegram's ephemeral activity deletion) so the web header
    * does not show "Thinking" forever when Telegram has already removed the line.
    */
   private applyActivityStaleness(newState: CursorState): CursorState {
+    if (newState.agentActivitySource === 'subagents' && newState.subagents.runningCount > 0) {
+      this.activityStableSince = null;
+      this.activityStableText = undefined;
+      this.activitySuppressedMatch = undefined;
+      return newState;
+    }
+
     const text = newState.agentActivityText?.trim()
       ? newState.agentActivityText.trim()
       : null;
@@ -248,7 +349,10 @@ export class StateManager extends EventEmitter {
       return {
         ...newState,
         agentStatus:
-          newState.agentStatus === 'waiting_approval' || newState.agentStatus === 'error'
+          newState.agentStatus === 'waiting_approval'
+          || newState.agentStatus === 'waiting_question'
+          || newState.agentStatus === 'waiting_user_input'
+          || newState.agentStatus === 'error'
             ? newState.agentStatus
             : 'idle',
         agentActivityText: null,
@@ -270,7 +374,10 @@ export class StateManager extends EventEmitter {
         return {
           ...newState,
           agentStatus:
-            newState.agentStatus === 'waiting_approval' || newState.agentStatus === 'error'
+            newState.agentStatus === 'waiting_approval'
+            || newState.agentStatus === 'waiting_question'
+            || newState.agentStatus === 'waiting_user_input'
+            || newState.agentStatus === 'error'
               ? newState.agentStatus
               : 'idle',
           agentActivityText: null,
@@ -301,7 +408,8 @@ export class StateManager extends EventEmitter {
     const agentBusy =
       newState.agentStatus === 'generating' ||
       newState.agentStatus === 'running_tool' ||
-      newState.agentStatus === 'thinking';
+      newState.agentStatus === 'thinking' ||
+      newState.agentStatus === 'running_subagents';
     const withinHold = Date.now() - this.backgroundTasksLastSeenAt < BACKGROUND_TASKS_STALE_MS;
     if (agentBusy && withinHold) {
       return { ...newState, backgroundTasks: this.backgroundTasksLastSeen };
@@ -532,6 +640,16 @@ export class StateManager extends EventEmitter {
       hasChange = true;
     }
 
+    if (prev.composerInputAvailable !== next.composerInputAvailable) {
+      patch.composerInputAvailable = next.composerInputAvailable;
+      hasChange = true;
+    }
+
+    if (JSON.stringify(prev.activeConversationContext) !== JSON.stringify(next.activeConversationContext)) {
+      patch.activeConversationContext = next.activeConversationContext;
+      hasChange = true;
+    }
+
     if (JSON.stringify(prev.messages) !== JSON.stringify(next.messages)) {
       patch.messages = next.messages;
       hasChange = true;
@@ -542,17 +660,27 @@ export class StateManager extends EventEmitter {
       hasChange = true;
     }
 
+    if (JSON.stringify(prev.globalApprovalNotifications) !== JSON.stringify(next.globalApprovalNotifications)) {
+      patch.globalApprovalNotifications = next.globalApprovalNotifications;
+      hasChange = true;
+    }
+
     if (JSON.stringify(prev.chatTabs) !== JSON.stringify(next.chatTabs)) {
       patch.chatTabs = next.chatTabs;
       hasChange = true;
     }
 
-    if (prev.mode?.current !== next.mode?.current) {
+    if (prev.activeComposerId !== next.activeComposerId) {
+      patch.activeComposerId = next.activeComposerId;
+      hasChange = true;
+    }
+
+    if (JSON.stringify(prev.mode) !== JSON.stringify(next.mode)) {
       patch.mode = next.mode;
       hasChange = true;
     }
 
-    if (prev.model?.current !== next.model?.current || prev.model?.currentId !== next.model?.currentId) {
+    if (JSON.stringify(prev.model) !== JSON.stringify(next.model)) {
       patch.model = next.model;
       hasChange = true;
     }
@@ -582,6 +710,16 @@ export class StateManager extends EventEmitter {
       hasChange = true;
     }
 
+    if (JSON.stringify(prev.subagents) !== JSON.stringify(next.subagents)) {
+      patch.subagents = next.subagents;
+      hasChange = true;
+    }
+
+    if (JSON.stringify(prev.agentChanges) !== JSON.stringify(next.agentChanges)) {
+      patch.agentChanges = next.agentChanges;
+      hasChange = true;
+    }
+
     if (JSON.stringify(prev.gitStatus) !== JSON.stringify(next.gitStatus)) {
       patch.gitStatus = next.gitStatus;
       hasChange = true;
@@ -594,6 +732,21 @@ export class StateManager extends EventEmitter {
 
     if (prev.agentStopSelectorPath !== next.agentStopSelectorPath) {
       patch.agentStopSelectorPath = next.agentStopSelectorPath;
+      hasChange = true;
+    }
+
+    if (prev.agentStopAvailable !== next.agentStopAvailable) {
+      patch.agentStopAvailable = next.agentStopAvailable;
+      hasChange = true;
+    }
+
+    if (prev.agentStopSource !== next.agentStopSource) {
+      patch.agentStopSource = next.agentStopSource;
+      hasChange = true;
+    }
+
+    if (JSON.stringify(prev.exploratoryUi) !== JSON.stringify(next.exploratoryUi)) {
+      patch.exploratoryUi = next.exploratoryUi;
       hasChange = true;
     }
 

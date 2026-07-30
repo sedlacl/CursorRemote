@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import type {
   ChatElement,
   PlanBlock,
@@ -8,7 +8,9 @@ import { useCommandClient } from '../../state/commandClient.js';
 import { useUiState } from '../../state/uiState.js';
 import { commandResultData } from '../../utils/commandResult.js';
 import { plainTextToHtml, sanitizeHtml } from '../../utils/sanitizeHtml.js';
-import { NativeCodeBlock, NativeCodeBlocks } from './codeBlocks.js';
+import { buildAssistantContentSegments } from '../../utils/assistantContent.js';
+import { NativeCodeBlock } from './codeBlocks.js';
+import { AssistantMessageContent } from './assistantContent.js';
 
 export function messageRenderKey(msg: ChatElement): string {
   try {
@@ -21,19 +23,32 @@ export function messageRenderKey(msg: ChatElement): string {
 export function MessageList({ messages }: { messages: ChatElement[] }) {
   return (
     <>
-      {messages.map(message => (
-        <MessageRenderer key={message.id} message={message} />
+      {messages.map((message, index) => (
+        <MessageRenderer
+          key={message.id}
+          message={message}
+          showRoleLabel={
+            message.type === 'human'
+            || (message.type === 'assistant' && messages[index - 1]?.type !== 'assistant')
+          }
+        />
       ))}
     </>
   );
 }
 
-export const MessageRenderer = React.memo(function MessageRenderer({ message }: { message: ChatElement }) {
+export const MessageRenderer = React.memo(function MessageRenderer({
+  message,
+  showRoleLabel = true,
+}: {
+  message: ChatElement;
+  showRoleLabel?: boolean;
+}) {
   switch (message.type) {
     case 'human':
-      return <HumanMessage message={message} />;
+      return <HumanMessage message={message} showRoleLabel={showRoleLabel} />;
     case 'assistant':
-      return <AssistantMessage message={message} />;
+      return <AssistantMessage message={message} showRoleLabel={showRoleLabel} />;
     case 'tool':
       return <ToolMessage message={message} />;
     case 'thought':
@@ -49,11 +64,21 @@ export const MessageRenderer = React.memo(function MessageRenderer({ message }: 
     default:
       return null;
   }
-}, (prev, next) => messageRenderKey(prev.message) === messageRenderKey(next.message));
+}, (prev, next) => (
+  prev.showRoleLabel === next.showRoleLabel
+  && messageRenderKey(prev.message) === messageRenderKey(next.message)
+));
 
-export function HumanMessage({ message }: { message: Extract<ChatElement, { type: 'human' }> }) {
+export function HumanMessage({
+  message,
+  showRoleLabel = true,
+}: {
+  message: Extract<ChatElement, { type: 'human' }>;
+  showRoleLabel?: boolean;
+}) {
   return (
     <div className="chat-el el-human" data-id={message.id} data-msg-type={message.type}>
+      {showRoleLabel && <div className="message-role-label">You</div>}
       <div className="human-bubble">
         {message.quoted?.text && (
           <div className="quoted-widget">
@@ -74,13 +99,25 @@ export function HumanMessage({ message }: { message: Extract<ChatElement, { type
   );
 }
 
-export function AssistantMessage({ message }: { message: Extract<ChatElement, { type: 'assistant' }> }) {
+export function AssistantMessage({
+  message,
+  showRoleLabel = true,
+}: {
+  message: Extract<ChatElement, { type: 'assistant' }>;
+  showRoleLabel?: boolean;
+}) {
   const html = message.html || plainTextToHtml(message.text || '');
+  const segments = useMemo(
+    () => buildAssistantContentSegments(html, message.codeBlocks || []),
+    [html, message.codeBlocks],
+  );
   return (
     <div className="chat-el el-assistant" data-id={message.id} data-msg-type={message.type}>
+      {showRoleLabel && <div className="message-role-label">Cursor</div>}
       <div className="assistant-bubble">
-        <div className="assistant-content markdown-body" dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
-        <NativeCodeBlocks codeBlocks={message.codeBlocks || []} />
+        <div className="assistant-content markdown-body">
+          <AssistantMessageContent segments={segments} />
+        </div>
       </div>
     </div>
   );
@@ -93,14 +130,21 @@ export function ToolMessage({ message }: { message: Extract<ChatElement, { type:
         <span className="tool-icon">
           {message.status === 'completed' ? '✓' : <span className="tool-spinner" aria-hidden="true" />}
         </span>
-        {message.summaryText ? (
-          <span className="tool-summary">{message.summaryText}</span>
-        ) : (
-          <>
+        <span className="tool-copy">
+          {message.summaryText ? (
+            <>
+              <span className="tool-summary">{message.summaryText}</span>
+              {message.details && !message.summaryText.includes(message.details) && (
+                <span className="tool-details">{message.details}</span>
+              )}
+            </>
+          ) : (
+            <span className="tool-primary-line">
             {message.action && <span className="tool-action">{message.action}</span>}
             {message.details && <span className="tool-details">{message.details}</span>}
-          </>
-        )}
+            </span>
+          )}
+        </span>
         {(message.filename || message.additions != null || message.deletions != null) && (
           <span className="tool-file-info">
             {message.filename && <span className="tool-filename">{message.filename}</span>}
@@ -130,7 +174,10 @@ export function formatThoughtLine(message: Extract<ChatElement, { type: 'thought
   const detail = (message.detail || '').trim();
   if (message.thoughtKind === 'step_summary') {
     const action = (message.action || '').trim();
-    return detail ? `${action || 'Steps'} — ${detail}` : (action || 'Steps');
+    if (!detail) return action || 'Steps';
+    return /^(Thought|Explored|Searched|Read|Finished)$/i.test(action)
+      ? `${action} ${detail}`
+      : `${action || 'Steps'} — ${detail}`;
   }
   if (message.thoughtKind === 'thinking_step') {
     const action = (message.action || '').trim();

@@ -1,9 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CursorState } from '../../../../server/types.js';
 import { useCommandClient } from '../../../state/commandClient.js';
+import { downloadDomExport, type DomExportScope } from '../../../state/domExport.js';
 import { fetchDebugInfo, type HealthSnapshot } from '../../../state/serverHealth.js';
 import { useUiState } from '../../../state/uiState.js';
 import { buildStopButtonState } from '../../../view-models/stopState.js';
+
+function formatAgentStopDebugLabel(state: CursorState): string {
+  if (!state.agentStopAvailable && !state.agentStopSelectorPath) return '—';
+  switch (state.agentStopSource) {
+    case 'composer':
+      return 'composer · data-stop-button / debug-stop';
+    case 'background_task':
+      return 'background_task · shell/toolbar stop';
+    case 'none':
+      return 'none';
+    default:
+      return String(state.agentStopSource);
+  }
+}
 
 export interface DebugSheetProps {
   visible: boolean;
@@ -25,6 +40,8 @@ export function DebugSheet({
   const [details, setDetails] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [exporting, setExporting] = useState<DomExportScope | null>(null);
+  const [exportError, setExportError] = useState('');
 
   const loadDetails = useCallback(async () => {
     setLoading(true);
@@ -70,6 +87,7 @@ export function DebugSheet({
       ['Server version', server?.version ?? '—'],
       ['Server port', server?.port ?? '—'],
       ['Instance ID', server?.instanceId ?? '—'],
+      ['Diagnostic ID', server?.diagnosticId ?? '—'],
       ['PID', server?.pid ?? '—'],
       ['Data dir', server?.dataDirName ?? bridge?.dataDirName ?? '—'],
       ['Client build', server?.clientBuild ?? '—'],
@@ -81,7 +99,7 @@ export function DebugSheet({
       ['Last push window key', gitSnapshots?.lastPushWindowKey ?? '—'],
       ['State gitStatus', state.gitStatus ? `F:${state.gitStatus.changedCount}` : 'null'],
       ['Health gitStatus', serverHealth?.gitStatus ? `F:${serverHealth.gitStatus.changedCount}` : 'null'],
-      ['Stop selector', (details?.agentStopSelectorPath as string | undefined) ?? state.agentStopSelectorPath ?? '—'],
+      ['Stop target', formatAgentStopDebugLabel(state)],
       ['Stop available', (details?.agentStopAvailable as boolean | undefined) == null ? String(state.agentStopAvailable) : String(details?.agentStopAvailable)],
       ['Stop source', (details?.agentStopSource as string | undefined) ?? state.agentStopSource ?? '—'],
       ['Activity source', (details?.agentActivitySource as string | undefined) ?? state.agentActivitySource ?? '—'],
@@ -116,6 +134,31 @@ export function DebugSheet({
     ui.showToast('Server kill sent', 'success');
   }, [command, ui]);
 
+  const exportDom = useCallback(async (scope: DomExportScope) => {
+    if (scope === 'document') {
+      const confirmed = window.confirm(
+        'Export full window DOM as raw, unsanitized HTML?\n\n' +
+        'It may contain chats, code, terminal output, local paths, and secrets.',
+      );
+      if (!confirmed) return;
+    }
+    setExporting(scope);
+    setExportError('');
+    try {
+      const filename = await downloadDomExport(scope, {
+        windowId: state.activeWindowId,
+        composerId: state.activeComposerId,
+      });
+      ui.showToast(`Downloaded ${filename}`, 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setExportError(message);
+      ui.showToast('DOM export failed', 'error');
+    } finally {
+      setExporting(null);
+    }
+  }, [state.activeComposerId, state.activeWindowId, ui]);
+
   return (
     <div id="sheet-debug" className={`bottom-sheet debug-sheet ${visible ? '' : 'hidden'}`}>
       <div className="sheet-header debug-sheet-header">
@@ -133,6 +176,33 @@ export function DebugSheet({
         </div>
       </div>
       {error && <div className="debug-error">{error}</div>}
+      <div className="debug-export-panel">
+        <div className="debug-export-warning">
+          Raw diagnostic HTML and snapshot API responses are not sanitized and may contain sensitive chats, code, terminals, paths, or secrets.
+          Use <code>/debug/snapshot?id=&lt;Diagnostic ID&gt;</code> with session or <code>DIAGNOSTIC_TOKEN</code> Bearer auth.
+        </div>
+        <div className="debug-export-actions">
+          <button
+            id="debug-export-chat"
+            type="button"
+            className="debug-action-btn"
+            disabled={exporting !== null || !socketConnected || !state.activeComposerId}
+            onClick={() => void exportDom('chat')}
+          >
+            {exporting === 'chat' ? 'Exporting chat…' : 'Export chat DOM'}
+          </button>
+          <button
+            id="debug-export-document"
+            type="button"
+            className="debug-action-btn debug-export-danger"
+            disabled={exporting !== null || !socketConnected || !state.activeWindowId}
+            onClick={() => void exportDom('document')}
+          >
+            {exporting === 'document' ? 'Exporting window…' : 'Export full window DOM'}
+          </button>
+        </div>
+      </div>
+      {exportError && <div className="debug-error">{exportError}</div>}
       <div className="debug-sheet-body">
         {rows.map(([label, value]) => (
           <div key={label} className="debug-row">

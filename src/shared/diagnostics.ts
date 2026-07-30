@@ -3,6 +3,8 @@ import type { GitStatusInfo, GitWindowSnapshot } from './extension-bridge.js';
 export interface ServerIdentity {
   version: string;
   instanceId: string;
+  /** Short Crockford base32 relay instance ID (visible in UI, not a secret). */
+  diagnosticId: string;
   pid: number;
   port: number;
   host: string;
