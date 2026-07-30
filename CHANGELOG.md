@@ -6,6 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-30
+
+### Added
+- **Multitask and subagent support in the web client**: when the agent spawns subagents, a status strip shows how many are running, each one is tappable to jump straight into that subagent's conversation, and a Stop button ends the run without switching to Cursor. Previously a Multitask run looked like a stalled conversation on mobile — the parent chat sat idle while all the real work happened in subagents you had no way to see or stop.
+- **Return to the parent conversation from a subagent**: subagent views now offer a way back to the conversation that spawned them instead of dropping you into an empty composer with no context.
+- **Global pending-approval notification in the header**: approvals waiting anywhere across your windows and tasks are now surfaced in the header no matter which conversation you're looking at, and tapping the notification navigates to the task that's asking. Approvals are bound to the context they came from, and the approval card spells out what is actually being approved instead of showing a bare button label.
+- **Diagnostic ID and snapshot API for remote debugging**: every server instance gets a short diagnostic ID (shown as a badge in the bottom-right of the message area) that is stable across restarts — it is persisted in `data/diagnostic-id.json`, keyed by workspace and port, so two servers on one machine keep distinct IDs. The auth-gated `GET /debug/snapshot` endpoint returns Cursor's DOM, a screenshot, and current server state in one payload, so a remote user can hand over a single ID plus snapshot instead of a screen-sharing session. Documented in `docs/diagnostics-snapshot.md`.
+- **Git review from the web client**: file-level status, diffs, and stage/commit-style actions, backed by a new git bridge in the extension (`CursorRemote: Refresh Git Status`) that reads the workspace's real SCM state instead of guessing from the DOM.
+- **Composer queue, background tasks, and chat tab grouping** in the web client: queued follow-up messages are visible and actionable, background tasks have their own sheet, and chat tabs are grouped by project so multi-window setups stay readable.
+
+### Changed
+- **Web client rebuilt on React + Vite** (`npm run build` now runs `tsc && vite build`). The UI is split into composable components, view models, and state stores instead of one hand-rolled `app.js`, which is what made the Multitask, approval, and git work above practical.
+- **Stop resolver now keys on stable attributes**: stopping a run resolves the target through Cursor's `data-tool-call-id` instead of an `nth-of-type` DOM path that shifted whenever the message list re-rendered. When the target is ambiguous the action is refused with an error rather than clicking whatever happens to be in that position — a mis-resolved stop used to hit an unrelated tool call.
+
+### Fixed
+- **False approvals from a substring match on "Run"**: approval detection matched any element whose text contained `Run`, so unrelated controls were treated as pending approvals and could be "approved" remotely. Matching is now anchored to the real action buttons.
+- **Code blocks appended to the end of assistant messages**: structured `codeBlocks` were rendered after the prose instead of at their original position, so a message like "first do X `<code>` then Y `<code>`" came out as all the text followed by all the code. Blocks are now interleaved inline between paragraphs in the order Cursor emitted them.
+- **Parent conversation not found when it lives only in the agent sidebar**: the parent lookup only searched open editor tabs, so returning from a subagent failed whenever the parent conversation was open in the agent sidebar instead. The lookup now covers both.
+
 ## [0.1.46] - 2026-05-27
 
 ### Fixed
