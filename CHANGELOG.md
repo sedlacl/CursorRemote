@@ -6,7 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-07-30
+## [0.3.1] - 2026-07-30
 
 ### Added
 - **Multitask and subagent support in the web client**: when the agent spawns subagents, a status strip shows how many are running, each one is tappable to jump straight into that subagent's conversation, and a Stop button ends the run without switching to Cursor. Previously a Multitask run looked like a stalled conversation on mobile — the parent chat sat idle while all the real work happened in subagents you had no way to see or stop.
@@ -25,6 +25,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **False approvals from a substring match on "Run"**: approval detection matched any element whose text contained `Run`, so unrelated controls were treated as pending approvals and could be "approved" remotely. Matching is now anchored to the real action buttons.
 - **Code blocks appended to the end of assistant messages**: structured `codeBlocks` were rendered after the prose instead of at their original position, so a message like "first do X `<code>` then Y `<code>`" came out as all the text followed by all the code. Blocks are now interleaved inline between paragraphs in the order Cursor emitted them.
 - **Parent conversation not found when it lives only in the agent sidebar**: the parent lookup only searched open editor tabs, so returning from a subagent failed whenever the parent conversation was open in the agent sidebar instead. The lookup now covers both.
+- **Release workflow rejected by GitHub Actions**: the Open VSX step gated on `secrets.OVSX_PAT` inside an `if` condition, but the `secrets` context is not available there, so the whole workflow file was invalid and every tagged run failed instantly. The token is now read through `env` and the step skips with a warning when it is unset. Tag `v0.3.0` was never published because of this.
 - **Message extraction on current Cursor builds**: `data-flat-index` is no longer assumed to exist — missing attributes no longer silently become `0` and create duplicate message IDs. Tool-content lookup and scrolling now support current as well as legacy attributes, while message-history ordering consistently uses each message’s local flat index.
 
 ## [0.1.46] - 2026-05-27
