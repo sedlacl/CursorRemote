@@ -6,7 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-07-30
+## [0.3.0] - 2026-07-30
 
 ### Added
 - **Multitask and subagent support in the web client**: when the agent spawns subagents, a status strip shows how many are running, each one is tappable to jump straight into that subagent's conversation, and a Stop button ends the run without switching to Cursor. Previously a Multitask run looked like a stalled conversation on mobile — the parent chat sat idle while all the real work happened in subagents you had no way to see or stop.
@@ -19,11 +19,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - **Web client rebuilt on React + Vite** (`npm run build` now runs `tsc && vite build`). The UI is split into composable components, view models, and state stores instead of one hand-rolled `app.js`, which is what made the Multitask, approval, and git work above practical.
 - **Stop resolver now keys on stable attributes**: stopping a run resolves the target through Cursor's `data-tool-call-id` instead of an `nth-of-type` DOM path that shifted whenever the message list re-rendered. When the target is ambiguous the action is refused with an error rather than clicking whatever happens to be in that position — a mis-resolved stop used to hit an unrelated tool call.
+- **Breaking change — public extension identity is now `qjohn.cursor-remote`** (previously `cursor-remote.cursor-remote`). Existing installs do not update automatically: uninstall the old extension and install the new one.
 
 ### Fixed
 - **False approvals from a substring match on "Run"**: approval detection matched any element whose text contained `Run`, so unrelated controls were treated as pending approvals and could be "approved" remotely. Matching is now anchored to the real action buttons.
 - **Code blocks appended to the end of assistant messages**: structured `codeBlocks` were rendered after the prose instead of at their original position, so a message like "first do X `<code>` then Y `<code>`" came out as all the text followed by all the code. Blocks are now interleaved inline between paragraphs in the order Cursor emitted them.
 - **Parent conversation not found when it lives only in the agent sidebar**: the parent lookup only searched open editor tabs, so returning from a subagent failed whenever the parent conversation was open in the agent sidebar instead. The lookup now covers both.
+- **Message extraction on current Cursor builds**: `data-flat-index` is no longer assumed to exist — missing attributes no longer silently become `0` and create duplicate message IDs. Tool-content lookup and scrolling now support current as well as legacy attributes, while message-history ordering consistently uses each message’s local flat index.
 
 ## [0.1.46] - 2026-05-27
 
