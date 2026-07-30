@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-07-30
+
 ### Changed
 - **Distinct QJohn branding**: the public extension is now displayed as **QJohn CursorRemote**, with a new antenna-and-psi icon that distinguishes `qjohn.cursor-remote` from the legacy extension.
 - **Current product screenshots and README overview**: replaced the outdated demos with anonymized desktop, mobile, and Git Review captures from the current React client, and added a short explanation of the QJohn edition.
