@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from 'fs';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { resolve } from 'path';
 import { updateVsixInstallDocs } from './update-vsix-install-docs.js';
 import { parseBaseSemver } from './version-utils.js';
@@ -46,6 +46,34 @@ function requireCleanTree(): void {
   }
 }
 
+function requireUnpublishedRelease(tag: string, repositoryUrl: string): void {
+  const match = repositoryUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)(?:\.git)?$/);
+  if (!match) {
+    console.error(`Cannot determine GitHub repository from: ${repositoryUrl}`);
+    process.exit(1);
+  }
+
+  const repository = `${match[1]}/${match[2]}`;
+  const result = spawnSync(
+    'gh',
+    ['api', `repos/${repository}/releases/tags/${tag}`, '--silent'],
+    { encoding: 'utf-8', shell: process.platform === 'win32' },
+  );
+
+  if (result.status === 0) {
+    console.error(
+      `${tag} already has a GitHub Release. Use "npm run release -- patch" instead of retagging it.`,
+    );
+    process.exit(1);
+  }
+
+  const error = `${result.stderr ?? ''}${result.stdout ?? ''}`;
+  if (!error.includes('HTTP 404')) {
+    console.error(`Could not verify that ${tag} is unpublished:\n${error.trim()}`);
+    process.exit(1);
+  }
+}
+
 /** Moves the failed version's changelog entry onto the new version. */
 function carryOverChangelog(from: string, to: string): void {
   const changelog = readFileSync(CHANGELOG_PATH, 'utf-8');
@@ -64,10 +92,16 @@ function carryOverChangelog(from: string, to: string): void {
 function main(): void {
   requireCleanTree();
 
-  const pkg = readJson<{ version: string }>(PKG_PATH);
+  const pkg = readJson<{
+    version: string;
+    repository: { url: string };
+  }>(PKG_PATH);
   const current = pkg.version;
   const next = nextPatch(current);
+  const currentTag = `v${current}`;
   const nextTag = `v${next}`;
+
+  requireUnpublishedRelease(currentTag, pkg.repository.url);
 
   if (tagExists(nextTag)) {
     console.error(`Tag ${nextTag} already exists.`);
