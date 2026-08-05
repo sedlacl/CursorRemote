@@ -313,6 +313,15 @@ export interface HumanMessage extends TranscriptOrder {
   mentions: { name: string; mentionType: string }[];
   /** Quoted / reply preview from composer (e.g. ProseMirror blockquote). */
   quoted?: { text: string };
+  /** Count of image attachment pills (`.context-pill-image`) in the human bubble. */
+  imageCount?: number;
+}
+
+export interface SkillOption {
+  id: string;
+  name: string;
+  description?: string;
+  source: 'user' | 'cursor' | 'project';
 }
 
 export type DiffLineKind = 'add' | 'rem' | 'ctx' | 'meta' | 'hunk';

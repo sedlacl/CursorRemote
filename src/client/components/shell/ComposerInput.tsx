@@ -1,5 +1,5 @@
-import React, { useCallback, useRef, useState } from 'react';
-import type { ActiveConversationContext, CursorState } from '../../../server/types.js';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ActiveConversationContext, CursorState, SkillOption } from '../../../server/types.js';
 import { modeUi } from '../../constants/modeOptions.js';
 import { useTextareaAutosize } from '../../hooks/useTextareaAutosize.js';
 import { useCommandClient } from '../../state/commandClient.js';
@@ -10,12 +10,14 @@ import {
   getVisibleGitStatus,
 } from '../../view-models/backgroundTasks.js';
 import { newCommandId } from '../../utils/commandIds.js';
+import { applySkillSlashToken, parseSkillSlashQuery } from '../../utils/skillSlashQuery.js';
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS,
   type BooleanStateSetter,
   type PendingAttachment,
 } from '../../types/ui.js';
+import { SkillAutocomplete } from './SkillAutocomplete.js';
 
 function AttachmentStrip({
   attachments,
@@ -72,6 +74,8 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [returnPending, setReturnPending] = useState(false);
+  const [skillPickerDismissed, setSkillPickerDismissed] = useState(false);
+  const [skillPickerForced, setSkillPickerForced] = useState(false);
   const conversationContext = state.activeConversationContext;
   const showReturnToParent = shouldShowReturnToParent(conversationContext);
   const inputDisabled = !state.inputAvailable;
@@ -80,6 +84,9 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
   const backgroundTasks = getVisibleBackgroundTasks(state);
   const backgroundTaskCount = getBackgroundTaskCount(backgroundTasks);
   const gitStatus = getVisibleGitStatus(state);
+  const slashQuery = useMemo(() => parseSkillSlashQuery(text), [text]);
+  const skillPickerOpen = !inputDisabled && !skillPickerDismissed && (!!slashQuery || skillPickerForced);
+  const skillFilterQuery = slashQuery?.query ?? '';
 
   const clearAttachments = useCallback(() => {
     setAttachments([]);
@@ -188,6 +195,41 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
     ui.openGitSheet();
   }, [gitStatus, ui]);
 
+  const dismissSkillPicker = useCallback(() => {
+    setSkillPickerDismissed(true);
+    setSkillPickerForced(false);
+  }, []);
+
+  const selectSkill = useCallback((skill: SkillOption) => {
+    const token = `/${skill.name} `;
+    setText(prev => applySkillSlashToken(prev, token));
+    setSkillPickerDismissed(true);
+    setSkillPickerForced(false);
+    ui.showToast(`Skill: /${skill.name}`, 'success');
+    requestAnimationFrame(() => {
+      autosize();
+      inputRef.current?.focus();
+    });
+  }, [autosize, ui]);
+
+  const openSkillPicker = useCallback(() => {
+    if (inputDisabled) return;
+    setSkillPickerDismissed(false);
+    setSkillPickerForced(true);
+    setText(prev => (parseSkillSlashQuery(prev) ? prev : (prev.trim() ? prev : '/')));
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [inputDisabled]);
+
+  useEffect(() => {
+    // Re-arm only after leaving slash mode (delete `/` or type a space), not on each keystroke.
+    if (!slashQuery) {
+      setSkillPickerDismissed(false);
+      return;
+    }
+    // Slash-driven mode owns the picker; drop pill force-open.
+    setSkillPickerForced(false);
+  }, [slashQuery]);
+
   if (showReturnToParent) {
     const parentTitle = conversationContext.parentTitle?.trim() || 'rodičovské konverzaci';
     const label = `← Zpět k ${parentTitle}`;
@@ -208,6 +250,12 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
 
   return (
     <footer id="input-bar">
+      <SkillAutocomplete
+        visible={skillPickerOpen}
+        query={skillFilterQuery}
+        onSelect={selectSkill}
+        onDismiss={dismissSkillPicker}
+      />
       <div id="mode-model-bar" className="mode-model-bar">
         <button id="pill-mode" className="pill" aria-label="Select mode" onClick={() => ui.openSheet('mode')}>
           <span id="pill-mode-icon" className="pill-icon">{currentMode.icon}</span>
@@ -216,6 +264,17 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
         </button>
         <button id="pill-model" className="pill" aria-label="Select model" onClick={() => ui.openSheet('model')}>
           <span id="pill-model-text">{state.model?.current || 'Auto'}</span>
+          <span className="pill-chevron">&#9662;</span>
+        </button>
+        <button
+          id="pill-skill"
+          className="pill"
+          type="button"
+          aria-label="Select skill"
+          disabled={inputDisabled}
+          onClick={openSkillPicker}
+        >
+          <span id="pill-skill-text">/</span>
           <span className="pill-chevron">&#9662;</span>
         </button>
         <div className="mode-model-bar-counts">
@@ -281,11 +340,17 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
             disabled={inputDisabled}
             value={text}
             onChange={event => {
-              setText(event.currentTarget.value);
+              const next = event.currentTarget.value;
+              setText(next);
               requestAnimationFrame(() => autosize());
             }}
             onPaste={handlePaste}
             onKeyDown={event => {
+              if (event.key === 'Escape' && skillPickerOpen) {
+                event.preventDefault();
+                dismissSkillPicker();
+                return;
+              }
               if (event.key !== 'Enter') return;
               if (event.metaKey || event.ctrlKey) {
                 event.preventDefault();

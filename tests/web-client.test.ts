@@ -609,6 +609,35 @@ describe('web: background tasks', () => {
     assert.ok(!sheet.classList.contains('hidden'));
   });
 
+  it('replaces the collapsed summary row with a waiting hint, then lists detailed jobs', () => {
+    fireFullState(env.mockSocket, {
+      ...baseState(),
+      backgroundTasks: [{ id: 'summary', label: '2 background tasks', expandSelectorPath: '#expand-summary' }],
+    });
+
+    const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
+    act(() => pill.click());
+
+    const sheet = env.document.getElementById('sheet-background-tasks')!;
+    assert.doesNotMatch(sheet.textContent || '', /2 background tasks/);
+    assert.doesNotMatch(sheet.textContent || '', /No stop/);
+    assert.match(sheet.textContent || '', /Collapsed in Cursor/);
+
+    fireFullState(env.mockSocket, {
+      ...baseState(),
+      backgroundTasks: [
+        { id: 'summary', label: '2 background tasks', expandSelectorPath: '#expand-summary' },
+        { id: 'b1', label: 'npm run dev', stopSelectorPath: '#stop-one' },
+        { id: 'b2', label: 'npm test --watch', stopSelectorPath: '#stop-two' },
+      ],
+    });
+
+    assert.match(sheet.textContent || '', /npm run dev/);
+    assert.match(sheet.textContent || '', /npm test --watch/);
+    assert.doesNotMatch(sheet.textContent || '', /2 background tasks/);
+    assert.doesNotMatch(sheet.textContent || '', /Collapsed in Cursor/);
+  });
+
   it('counts background task summary labels from Cursor chrome', () => {
     fireFullState(env.mockSocket, {
       ...baseState(),
@@ -766,6 +795,7 @@ describe('web: git status', () => {
     const sheet = env.document.getElementById('sheet-git-review');
     assert.ok(sheet, 'Expected git review sheet to open');
     assert.ok(!sheet!.classList.contains('hidden'));
+    assert.match(sheet!.textContent || '', /cursor-ide-remote · main/);
     assert.ok(env.document.querySelector('.git-file-row'), 'Expected at least one git file row');
   });
 

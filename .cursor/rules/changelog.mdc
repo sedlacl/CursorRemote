@@ -1,0 +1,53 @@
+---
+description: Povinný changelog + automatický SemVer bump (bez Unreleased)
+alwaysApply: true
+---
+
+# Changelog + version bump
+
+Každá **user-facing** změna musí před „hotovo“ mít **dated** sekci v `CHANGELOG.md` a
+odpovídající verzi v `package.json` / `package-lock.json`. **`[Unreleased]` se nepoužívá.**
+
+## Kdy
+
+- **Ano** — nová funkce, bugfix, změna chování UI / API / extension, breaking change, security.
+- **Ne** — čistý refactor, jen testy, jen triage `docs/issues/` bez shipped fixu, formátování.
+
+## SemVer (automaticky)
+
+Výchozí je **patch**. Zvol vyšší jen když sedí:
+
+| Bump | Kdy |
+| --- | --- |
+| `patch` | Opravy, drobná UX, interní API beze změny kontraktu |
+| `minor` | Nová user-facing schopnost / endpoint (zpětně kompatibilní) |
+| `major` | Breaking change pro uživatele nebo veřejný kontrakt |
+
+## Postup při „hotovo“
+
+1. Přečti aktuální `version` z `package.json`.
+2. Pokud **nejvyšší** changelog sekce je už `## [X.Y.Z] - <dnes>` **a** `package.json`
+   je na `X.Y.Z`, **jen doplň** položky do té sekce (stejný implementační den = jedna verze).
+3. Jinak bumpni SemVer, nastav stejnou verzi v:
+   - `package.json`
+   - `package-lock.json` (`version` + `packages[""].version`)
+   - volitelně `npx tsx scripts/update-vsix-install-docs.ts` (README / setup-guide VSIX řádky)
+4. Do `CHANGELOG.md` vlož **nahoru** (hned za úvod, před starší verze):
+
+   `## [X.Y.Z] - YYYY-MM-DD`
+
+   Datum = **datum implementace** (dnešek z kontextu session / `Today's date`), ne datum releasu/tagu.
+5. Položky anglicky, Keep a Changelog sekce (`Added` / `Changed` / `Fixed` / …), styl:
+   **tučný název** + 1–3 věty pro uživatele.
+
+## Release / tag
+
+`npm run release -- patch|minor|major` dál řeší commit + tag. Agent **nespouští** release ani
+push tagů, dokud to uživatel výslovně neřekne. Bump při implementaci changelog už připraví;
+release skript nesmí znovu zavádět `[Unreleased]`.
+
+## Checklist
+
+- [ ] Žádné `[Unreleased]`
+- [ ] Verze v package ↔ lock ↔ changelog header sedí
+- [ ] Datum v headeru = den implementace

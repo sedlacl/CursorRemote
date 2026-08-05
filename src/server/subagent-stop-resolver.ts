@@ -53,6 +53,39 @@ function findToolbarJobs(root: Document | Element): Element[] {
     .filter(job => !isShellJob(job));
 }
 
+function findCardStopButton(scope: Element): Element | null {
+  return scope.querySelector('[data-subagent-task-action="stop"]')
+    || scope.querySelector('.task-subagent-header-pill-button--stop');
+}
+
+function readCardTitle(card: Element): string {
+  const header = card.querySelector('[data-subagent-task-card-header="true"]');
+  const titled =
+    card.querySelector('.subagent-task-card-title[title]')
+    || header?.querySelector('[title]')
+    || (header?.hasAttribute('title') ? header : null);
+  const fromAttr = normalizeDomAttributeValue(titled?.getAttribute('title'));
+  if (fromAttr) return fromAttr;
+  if (header) {
+    const clone = header.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll(
+      '[data-subagent-task-model], [data-subagent-task-action], .ui-subagent-status-indicator--running-loader',
+    ).forEach((el) => el.remove());
+    const headerText = normalizeDomAttributeValue(clone.textContent);
+    if (headerText) return headerText;
+  }
+  return normalizeDomAttributeValue(
+    card.querySelector('.subagent-task-card-title')?.textContent,
+  );
+}
+
+function readCardModel(card: Element): string {
+  return normalizeDomAttributeValue(
+    card.querySelector('[data-subagent-task-model="true"]')?.textContent
+    || card.querySelector('.task-subagent-model-hover-trigger')?.textContent,
+  );
+}
+
 function resolveCardStop(root: Document | Element, stop: SubagentStopDescriptor): SubagentStopResolveResult {
   const candidates: Element[] = [];
 
@@ -70,7 +103,7 @@ function resolveCardStop(root: Document | Element, stop: SubagentStopDescriptor)
           }
         }
       }
-      const btn = row.querySelector('.task-subagent-header-pill-button--stop');
+      const btn = findCardStopButton(row);
       if (btn) candidates.push(btn);
     }
   }
@@ -78,25 +111,22 @@ function resolveCardStop(root: Document | Element, stop: SubagentStopDescriptor)
   if (candidates.length === 0 && stop.messageId) {
     for (const row of Array.from(root.querySelectorAll('[data-message-id]'))) {
       if (norm(row.getAttribute('data-message-id')) !== norm(stop.messageId)) continue;
-      const btn = row.querySelector('.task-subagent-header-pill-button--stop');
+      const btn = findCardStopButton(row);
       if (btn) candidates.push(btn);
     }
   }
 
   if (candidates.length === 0) {
-    for (const card of Array.from(root.querySelectorAll('.subagent-task-card[data-chrome="card"]'))) {
-      const cardTitle = normalizeDomAttributeValue(
-        card.querySelector('.subagent-task-card-title[title]')?.getAttribute('title')
-        || card.querySelector('.subagent-task-card-title')?.textContent,
-      );
+    for (const card of Array.from(root.querySelectorAll(
+      '[data-subagent-task-card="true"], .subagent-task-card[data-chrome="card"]',
+    ))) {
+      const cardTitle = readCardTitle(card);
       if (norm(cardTitle) !== norm(stop.matchTitle)) continue;
       if (stop.matchModel) {
-        const cardModel = normalizeDomAttributeValue(
-          card.querySelector('.task-subagent-model-hover-trigger')?.textContent,
-        );
+        const cardModel = readCardModel(card);
         if (cardModel && norm(cardModel) !== norm(stop.matchModel)) continue;
       }
-      const btn = card.querySelector('.task-subagent-header-pill-button--stop');
+      const btn = findCardStopButton(card);
       if (btn) candidates.push(btn);
     }
   }
@@ -142,6 +172,10 @@ function tryLegacyPath(root: Document | Element, legacyStopSelectorPath?: string
   if (!legacyStopSelectorPath) return { ok: false, code: 'stop_not_found' };
   try {
     const preferred = root.querySelector(legacyStopSelectorPath);
+    if (preferred?.matches('[data-subagent-task-action="stop"]')) {
+      console.warn('[subagent-stop-resolver] Used legacy stop selector path fallback');
+      return { ok: true, element: preferred };
+    }
     if (preferred?.matches('.task-subagent-header-pill-button--stop')) {
       console.warn('[subagent-stop-resolver] Used legacy stop selector path fallback');
       return { ok: true, element: preferred };
@@ -227,34 +261,62 @@ export function buildSubagentStopResolveEvaluateScript(
       return Array.from(toolbar.querySelectorAll('.composer-toolbar-background-job-item'))
         .filter(job => !isShellJob(job));
     }
+    function findCardStopButton(scope) {
+      return scope.querySelector('[data-subagent-task-action="stop"]')
+        || scope.querySelector('.task-subagent-header-pill-button--stop');
+    }
+    function readCardTitle(card) {
+      const header = card.querySelector('[data-subagent-task-card-header="true"]');
+      const titled =
+        card.querySelector('.subagent-task-card-title[title]')
+        || (header && header.querySelector('[title]'))
+        || (header && header.hasAttribute('title') ? header : null);
+      const fromAttr = normalizeDomAttributeValue(titled && titled.getAttribute('title'));
+      if (fromAttr) return fromAttr;
+      if (header) {
+        const clone = header.cloneNode(true);
+        clone.querySelectorAll(
+          '[data-subagent-task-model], [data-subagent-task-action], .ui-subagent-status-indicator--running-loader',
+        ).forEach((el) => el.remove());
+        const headerText = normalizeDomAttributeValue(clone.textContent);
+        if (headerText) return headerText;
+      }
+      return normalizeDomAttributeValue(
+        card.querySelector('.subagent-task-card-title') && card.querySelector('.subagent-task-card-title').textContent,
+      );
+    }
+    function readCardModel(card) {
+      const modelEl = card.querySelector('[data-subagent-task-model="true"]')
+        || card.querySelector('.task-subagent-model-hover-trigger');
+      return normalizeDomAttributeValue(modelEl && modelEl.textContent);
+    }
     function resolveCardStop(root, stop) {
       const candidates = [];
       if (stop.toolCallId) {
         for (const row of Array.from(root.querySelectorAll('[data-tool-call-id]'))) {
           if (!toolCallIdsMatch(stop.toolCallId, row.getAttribute('data-tool-call-id'))) continue;
-          const btn = row.querySelector('.task-subagent-header-pill-button--stop');
+          const btn = findCardStopButton(row);
           if (btn) candidates.push(btn);
         }
       }
       if (candidates.length === 0 && stop.messageId) {
         for (const row of Array.from(root.querySelectorAll('[data-message-id]'))) {
           if (norm(row.getAttribute('data-message-id')) !== norm(stop.messageId)) continue;
-          const btn = row.querySelector('.task-subagent-header-pill-button--stop');
+          const btn = findCardStopButton(row);
           if (btn) candidates.push(btn);
         }
       }
       if (candidates.length === 0) {
-        for (const card of Array.from(root.querySelectorAll('.subagent-task-card[data-chrome="card"]'))) {
-          const cardTitle = normalizeDomAttributeValue(
-            card.querySelector('.subagent-task-card-title[title]')?.getAttribute('title')
-            || card.querySelector('.subagent-task-card-title')?.textContent,
-          );
+        for (const card of Array.from(root.querySelectorAll(
+          '[data-subagent-task-card="true"], .subagent-task-card[data-chrome="card"]',
+        ))) {
+          const cardTitle = readCardTitle(card);
           if (norm(cardTitle) !== norm(stop.matchTitle)) continue;
           if (stop.matchModel) {
-            const cardModel = normalizeDomAttributeValue(card.querySelector('.task-subagent-model-hover-trigger')?.textContent);
+            const cardModel = readCardModel(card);
             if (cardModel && norm(cardModel) !== norm(stop.matchModel)) continue;
           }
-          const btn = card.querySelector('.task-subagent-header-pill-button--stop');
+          const btn = findCardStopButton(card);
           if (btn) candidates.push(btn);
         }
       }
@@ -292,7 +354,9 @@ export function buildSubagentStopResolveEvaluateScript(
       if (!legacyStopSelectorPath) return { ok: false, code: 'stop_not_found' };
       try {
         const preferred = root.querySelector(legacyStopSelectorPath);
-        if (preferred?.matches?.('.task-subagent-header-pill-button--stop, .composer-toolbar-background-job-item-stop[data-click-ready="true"]')) {
+        if (preferred?.matches?.(
+          '[data-subagent-task-action="stop"], .task-subagent-header-pill-button--stop, .composer-toolbar-background-job-item-stop[data-click-ready="true"]',
+        )) {
           console.warn('[subagent-stop-resolver] Used legacy stop selector path fallback');
           return { ok: true, element: preferred };
         }

@@ -53,15 +53,26 @@ function main(): void {
   updateVsixInstallDocs(newVersion);
 
   const changelog = readFileSync(CHANGELOG_PATH, 'utf-8');
+  const versionHeader = `## [${newVersion}] - ${todayDate()}`;
   const unreleasedHeader = '## [Unreleased]';
-  const newHeader = `## [Unreleased]\n\n## [${newVersion}] - ${todayDate()}`;
 
-  if (changelog.includes(unreleasedHeader)) {
-    const updated = changelog.replace(unreleasedHeader, newHeader);
+  if (changelog.includes(`## [${newVersion}]`)) {
+    console.log(`✓ CHANGELOG.md already has ${versionHeader.split(' - ')[0]}`);
+  } else if (changelog.includes(unreleasedHeader)) {
+    // Legacy: fold any leftover Unreleased block into the new version (do not keep Unreleased).
+    const updated = changelog.replace(unreleasedHeader, versionHeader);
     writeFileSync(CHANGELOG_PATH, updated, 'utf-8');
-    console.log(`✓ Updated CHANGELOG.md`);
+    console.log(`✓ Updated CHANGELOG.md (replaced [Unreleased])`);
   } else {
-    console.warn('⚠ Could not find [Unreleased] header in CHANGELOG.md');
+    const insertAt = changelog.search(/\n## \[/);
+    if (insertAt === -1) {
+      writeFileSync(CHANGELOG_PATH, `${changelog.trimEnd()}\n\n${versionHeader}\n`, 'utf-8');
+    } else {
+      const updated =
+        `${changelog.slice(0, insertAt)}\n${versionHeader}\n${changelog.slice(insertAt)}`;
+      writeFileSync(CHANGELOG_PATH, updated, 'utf-8');
+    }
+    console.log(`✓ Updated CHANGELOG.md`);
   }
 
   execSync(

@@ -8,6 +8,7 @@ import { readFileSync, existsSync } from 'fs';
 import type { ServerConfig, CursorState, CommandPayload, CommandResult } from './types.js';
 import { waitForFreshExtraction, waitForHistoryScopeChange } from './extraction-wait.js';
 import { validateAttachments } from './message-attachments.js';
+import { loadSkillCatalog } from './skills-catalog.js';
 import type { StateManager } from './state-manager.js';
 import type { CommandExecutor } from './command-executor.js';
 import type { CDPBridge } from './cdp-bridge.js';
@@ -746,6 +747,25 @@ export class Relay {
       }
     });
 
+    this.app.get('/api/git/files/:fileId/content', async (req, res) => {
+      if (this.authEnabled && this.resolveHttpSession(req) === undefined) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+      try {
+        const fileId = decodeURIComponent(req.params.fileId);
+        const snapshotId = typeof req.query.snapshotId === 'string' ? req.query.snapshotId : undefined;
+        const content = await this.gitScmService.getContent({ fileId, snapshotId });
+        res.json(content);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        let status = 500;
+        if (message.includes('Unknown fileId') || message.includes('Invalid')) status = 400;
+        if (message === GIT_SNAPSHOT_STALE_ERROR) status = 409;
+        res.status(status).json({ error: message });
+      }
+    });
+
     this.app.post('/api/git/stage', async (req, res) => {
       if (this.authEnabled && this.resolveHttpSession(req) === undefined) {
         res.status(401).json({ error: 'unauthorized' });
@@ -1204,6 +1224,32 @@ export class Relay {
           payload.commandId
         );
         socket.emit('command:result', result);
+      });
+
+      socket.on('command:get_skill_options', async (payload: CommandPayload) => {
+        if (!payload.commandId) {
+          socket.emit('command:result', {
+            commandId: payload.commandId ?? 'unknown',
+            ok: false,
+            error: 'Missing commandId',
+          } satisfies CommandResult);
+          return;
+        }
+        console.log(`[relay] Command: get_skill_options from ${socket.id}`);
+        try {
+          const options = loadSkillCatalog(resolvePackageRoot());
+          socket.emit('command:result', {
+            commandId: payload.commandId,
+            ok: true,
+            data: { options },
+          } satisfies CommandResult);
+        } catch (err) {
+          socket.emit('command:result', {
+            commandId: payload.commandId,
+            ok: false,
+            error: err instanceof Error ? err.message : 'Failed to load skills',
+          } satisfies CommandResult);
+        }
       });
 
       socket.on('command:get_plan_full', async (payload: CommandPayload) => {

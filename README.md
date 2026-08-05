@@ -67,7 +67,7 @@ Install **QJohn CursorRemote** (`qjohn.cursor-remote`) from the Cursor Extension
 
 ```bash
 # From the command line
-cursor --install-extension cursor-remote-0.3.4.vsix
+cursor --install-extension cursor-remote-0.3.6.vsix
 ```
 
 Or in Cursor: open the Command Palette (`Ctrl+Shift+P`), run **Extensions: Install from VSIX...**, and select the file.

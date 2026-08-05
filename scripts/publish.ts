@@ -223,7 +223,8 @@ function main(): void {
     } else {
       if (!changelogBody) {
         console.error(`✗ No changelog entry found for v${version}.`);
-        console.error(`  Write a concise entry under [Unreleased] in CHANGELOG.md, then run:`);
+        console.error(`  Add a ## [${version}] - YYYY-MM-DD section in CHANGELOG.md (implementation date),`);
+        console.error(`  keep package.json in sync, then run:`);
         console.error(`  npm run release -- patch|minor|major`);
         console.error(`  npm run publish:public -- --commit`);
         process.exit(1);

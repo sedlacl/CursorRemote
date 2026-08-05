@@ -87,6 +87,9 @@ async function getComposerAttachmentPreviewCount(
       const fallback = document.querySelector('#workbench\\\\.parts\\\\.auxiliarybar, .composer-bar, [class*="composer"]');
       if (fallback && !roots.includes(fallback)) roots.push(fallback);
       const previewSelectors = [
+        '.context-pill-image',
+        'img.image-pill-img',
+        '.image-pill-container img',
         'img[src^="blob:"]',
         'img[src^="data:"]',
         '[class*="attachment"]',

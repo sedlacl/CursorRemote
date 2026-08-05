@@ -374,6 +374,65 @@ describe('Multitask and conversation state', () => {
     assert.equal(item._capabilities?.stop?.composerId, 'composer-card-stop');
   });
 
+  it('extracts current data-subagent-task-* cards with title beside model', () => {
+    const state = extract(`
+      <div id="container" data-composer-id="composer-new-subagent">
+        <div data-tool-call-id="call_new_card_1">
+          <div data-subagent-task-card="true">
+            <div data-subagent-task-card-header="true" role="button">
+              <div>
+                <span>Implement 3 remaining issues</span>
+                <span data-subagent-task-model="true">Explorer</span>
+              </div>
+              <div data-shimmer="true">Checking evidenceChecking evidence</div>
+              <div data-subagent-task-actions="overlay">
+                <button type="button" data-subagent-task-action="stop">Stop</button>
+              </div>
+            </div>
+            <div class="ui-subagent-status-indicator--running-loader"></div>
+          </div>
+        </div>
+      </div>
+      <div id="composer-toolbar-section">
+        <div>1 subagent running</div>
+      </div>
+    `);
+
+    const item = state.subagents.items[0];
+    assert.ok(item);
+    assert.equal(item.title, 'Implement 3 remaining issues');
+    assert.equal(item.model, 'Explorer');
+    assert.equal(item.status, 'running');
+    assert.equal(item.statusText, 'Checking evidence');
+    assert.equal(item.openAvailable, true);
+    assert.equal(item.stopAvailable, true);
+    assert.equal(item._capabilities?.stop?.kind, 'cardStop');
+    assert.equal(item._capabilities?.stop?.toolCallId, 'call_new_card_1');
+  });
+
+  it('counts human image pills outside the readonly Lexical input', () => {
+    const state = extract(`
+      <div id="container">
+        <div class="composer-rendered-message" data-message-role="human" data-message-kind="human"
+             data-message-id="ea047fd1-7032-4b0e-9b8a-b311732262f4" data-flat-index="0">
+          <div class="context-pill context-pill-image">
+            <div class="image-pill-container">
+              <img alt="Attached image" class="image-pill-img" src="vscode-file://probe-tiny.png" />
+            </div>
+          </div>
+          <div class="aislash-editor-input-readonly">//probe-image-indicator 1785944606872</div>
+        </div>
+      </div>
+    `);
+
+    const human = state.messages.find(m => m.type === 'human');
+    assert.ok(human);
+    assert.equal(human.type, 'human');
+    if (human.type !== 'human') return;
+    assert.equal(human.text, '//probe-image-indicator 1785944606872');
+    assert.equal(human.imageCount, 1);
+  });
+
   it('marks collapsed toolbar summary as single-job stop when jobs are hidden', () => {
     const state = extract(`
       <div id="container" data-composer-id="composer-collapsed-subagent">

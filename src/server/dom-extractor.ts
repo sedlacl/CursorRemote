@@ -1280,6 +1280,12 @@ export function extractionFunction(
           clone.querySelectorAll('blockquote, .mention').forEach((el) => el.remove());
           text = (clone.textContent || '').trim();
         }
+        // Image pills live beside the readonly Lexical input (not inside it).
+        // Live probe: `.context-pill.context-pill-image` > `.image-pill-container` > `img.image-pill-img`.
+        const imagePills = wrapper.querySelectorAll('.context-pill-image');
+        const imageCount = imagePills.length > 0
+          ? imagePills.length
+          : wrapper.querySelectorAll('img.image-pill-img').length;
 
         elements.push({
           type: 'human' as const,
@@ -1288,6 +1294,7 @@ export function extractionFunction(
           text,
           mentions,
           ...(quoted ? { quoted } : {}),
+          ...(imageCount > 0 ? { imageCount } : {}),
         });
         rawEl.parsedAs = 'human';
         continue;
@@ -1881,32 +1888,91 @@ export function extractionFunction(
       });
     };
 
-    for (const card of Array.from(container.querySelectorAll('.subagent-task-card[data-chrome="card"]'))) {
-      const titleEl = card.querySelector('.subagent-task-card-title[title]');
-      const title = titleEl?.getAttribute('title') || titleEl?.textContent || '';
-      const model = card.querySelector('.task-subagent-model-hover-trigger')?.textContent || undefined;
-      const running = !!card.querySelector('.ui-subagent-status-indicator--running-loader');
-      const statusText = (card.querySelector('[data-shimmer="true"]')?.textContent || '').replace(/\s+/g, ' ').trim();
-      const cardStopEl = card.querySelector('.task-subagent-header-pill-button--stop');
-      const cleanTitle = title.replace(/\s+/g, ' ').trim();
-      const cleanModel = model?.replace(/\s+/g, ' ').trim();
-      let status: CursorState['subagents']['items'][number]['status'] = 'unknown';
-      if (running) status = 'running';
-      else if (/\b(error|failed)\b/i.test(statusText)) status = 'error';
-      else if (/\b(waiting|blocked)\b/i.test(statusText)) status = 'waiting';
-      else if (/\b(done|complete(?:d)?|finished)\b/i.test(statusText)) status = 'completed';
-      addSubagent(title, model, status, statusText || undefined, {
-        openSelectorPath: title ? buildSelectorPath(card) : undefined,
-        stop: cardStopEl ? {
-          kind: 'cardStop',
-          matchTitle: cleanTitle,
-          ...(cleanModel ? { matchModel: cleanModel } : {}),
-          ...readSubagentCardStopIdentity(card),
-        } : undefined,
-      });
-    }
+    const dedupeRepeatedText = (value: string): string => {
+      const text = value.replace(/\s+/g, ' ').trim();
+      if (text.length >= 4 && text.length % 2 === 0) {
+        const half = text.slice(0, text.length / 2);
+        if (half === text.slice(half.length)) return half;
+      }
+      return text;
+    };
 
-    if (multitaskToolbar && subagentSummaryCount > 0) {
+    const readSubagentCardTitle = (card: Element): string => {
+      // Current Cursor: title is the leaf span immediately before [data-subagent-task-model].
+      const modelEl = card.querySelector('[data-subagent-task-model="true"]');
+      const modelSibling = modelEl?.previousElementSibling;
+      const siblingTitle = (modelSibling?.textContent || '').replace(/\s+/g, ' ').trim();
+      if (siblingTitle) return siblingTitle;
+
+      const titled =
+        card.querySelector('.subagent-task-card-title[title]')
+        || card.querySelector('[data-subagent-task-card-header="true"] [title]')
+        || card.querySelector('.subagent-task-card-title');
+      const fromAttr = titled?.getAttribute('title') || '';
+      if (fromAttr.trim()) return fromAttr;
+      return (titled?.textContent || '').replace(/\s+/g, ' ').trim();
+    };
+
+    const readSubagentCardModel = (card: Element): string | undefined => {
+      const modelEl =
+        card.querySelector('[data-subagent-task-model="true"]')
+        || card.querySelector('.task-subagent-model-hover-trigger');
+      const model = (modelEl?.textContent || '').replace(/\s+/g, ' ').trim();
+      return model || undefined;
+    };
+
+    const readSubagentCardStopEl = (card: Element): Element | null =>
+      card.querySelector('[data-subagent-task-action="stop"]')
+      || card.querySelector('.task-subagent-header-pill-button--stop');
+
+    const collectSubagentCards = (root: Element | Document): Element[] => {
+      const seen = new Set<Element>();
+      const cards: Element[] = [];
+      for (const card of Array.from(root.querySelectorAll(
+        '[data-subagent-task-card="true"], .subagent-task-card[data-chrome="card"]',
+      ))) {
+        if (seen.has(card)) continue;
+        seen.add(card);
+        cards.push(card);
+      }
+      return cards;
+    };
+
+    const ingestSubagentCards = (root: Element | Document): void => {
+      for (const card of collectSubagentCards(root)) {
+        const title = readSubagentCardTitle(card);
+        const model = readSubagentCardModel(card);
+        const running = !!card.querySelector('.ui-subagent-status-indicator--running-loader');
+        const statusText = dedupeRepeatedText(
+          card.querySelector('[data-shimmer="true"]')?.textContent
+          || card.querySelector('.ui-text-roll__item')?.textContent
+          || '',
+        );
+        const cardStopEl = readSubagentCardStopEl(card);
+        const cleanTitle = title.replace(/\s+/g, ' ').trim();
+        const cleanModel = model?.replace(/\s+/g, ' ').trim();
+        let status: CursorState['subagents']['items'][number]['status'] = 'unknown';
+        if (running) status = 'running';
+        else if (/\b(error|failed)\b/i.test(statusText)) status = 'error';
+        else if (/\b(waiting|blocked)\b/i.test(statusText)) status = 'waiting';
+        else if (/\b(done|complete(?:d)?|finished)\b/i.test(statusText)) status = 'completed';
+        const openTarget =
+          card.querySelector('[data-subagent-task-card-header="true"]')
+          || card;
+        addSubagent(title, model, status, statusText || undefined, {
+          openSelectorPath: cleanTitle ? buildSelectorPath(openTarget) : undefined,
+          stop: cardStopEl ? {
+            kind: 'cardStop',
+            matchTitle: cleanTitle,
+            ...(cleanModel ? { matchModel: cleanModel } : {}),
+            ...readSubagentCardStopIdentity(card),
+          } : undefined,
+        });
+      }
+    };
+
+    const ingestToolbarSubagentJobs = (): void => {
+      if (!multitaskToolbar || subagentSummaryCount <= 0) return;
       for (const job of Array.from(multitaskToolbar.querySelectorAll('.composer-toolbar-background-job-item'))) {
         if (job.querySelector('.composer-toolbar-background-job-shell-icon, .codicon-terminal')) continue;
         const title = (
@@ -1920,6 +1986,29 @@ export function extractionFunction(
           stop: stopEl ? { kind: 'toolbarStop', matchTitle: title } : undefined,
           toolbarExpandSelectorPath: subagentToolbarExpandPath,
         });
+      }
+    };
+
+    ingestSubagentCards(container);
+    ingestSubagentCards(document);
+    ingestToolbarSubagentJobs();
+
+    // Collapsed multitask toolbar: expand once when summary promises more workers than we extracted.
+    if (
+      multitaskToolbar
+      && subagentToolbarExpandPath
+      && subagentSummaryCount > subagentItems.length
+    ) {
+      try {
+        const expandEl = document.querySelector(subagentToolbarExpandPath);
+        if (expandEl instanceof HTMLElement) {
+          expandEl.scrollIntoView({ block: 'center', behavior: 'instant' });
+          expandEl.click();
+          ingestToolbarSubagentJobs();
+          ingestSubagentCards(document);
+        }
+      } catch {
+        // ignore invalid expand selector / click failures
       }
     }
 

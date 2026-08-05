@@ -4,7 +4,31 @@ All notable changes to CursorRemote are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.3.6] - 2026-08-05
+
+### Added
+- **Human message image indicator**: transcript bubbles show a compact “N images” badge when Cursor renders `.context-pill-image` / `img.image-pill-img` attachment pills (probe-verified; no base64 preview).
+- **Own Skills sheet**: composer has a `/` skills picker (Mode/Model-style bottom sheet) fed from the local SKILL.md filesystem catalog (`~/.cursor/skills`, `~/.cursor/skills-cursor`, project `.cursor/skills`), not Cursor’s slash-menu DOM. Selecting a skill inserts `/name ` into the composer; send types the token with a trailing space so Lexical can resolve a `cursor_skill` chip when the name is valid.
+- **Diagnostic state exports Multitask workers**: `GET /debug/snapshot?part=state` now includes sanitized `subagents` (`runningCount`, `summary`, items without `_capabilities`).
+
+### Changed
+- **Skills picker is inline autocomplete**: typing `/` opens a popover anchored above the composer (not a bottom sheet with its own search). Further keystrokes live-filter the list while the typed `/query` stays visible; Escape, tap outside, deleting `/`, or a trailing space dismisses without eating the text.
+
+### Fixed
+- **Multitask subagent list empty on current Cursor**: extractor and stop resolver now read `data-subagent-task-card` / `header` / `model` / `action="stop"` (legacy `.subagent-task-card` kept as fallback). Collapsed toolbar with `N subagents running` expands once when the summary count exceeds extracted items.
+- **Git Review double scrollbar**: the sheet no longer scrolls as a whole while the file list also scrolls; header/summary/segments stay pinned and only `.git-file-list` scrolls.
+- **Skills `/` typing continued under the picker**: the old bottom sheet did not consume composer input, so the filter stayed empty while text piled up behind the sheet.
+
+## [0.3.5] - 2026-08-05
+
+### Added
+- **Full file view in Git Review**: the diff overlay now has a **Diff | File** segment. File reads the working-tree contents through a new extension `content` action and `GET /api/git/files/:fileId/content` (text preview capped at ~512 KiB; binaries stay unavailable).
+
+### Changed
+- **Git Review summary shows the active branch**: the sheet header reads `repoLabel · branch` even with a single repository (branch used to appear only in the multi-repo picker chips).
+
+### Fixed
+- **Background Jobs sheet no longer lists the collapsed Cursor summary as a job**: when Cursor collapses shells behind `N background tasks`, the sheet used to show that aggregate row with **No stop** while the pill correctly said `Jobs:N`. Summary rows are filtered out; the sheet shows a short “expanding…” / “still collapsed in Cursor” hint, retries expand once, and lists real jobs (with Stop) as soon as the next poll delivers them.
 
 ## [0.3.4] - 2026-07-30
 

@@ -379,6 +379,111 @@ header {
   font-family: var(--font-mono);
 }
 
+.mention-badge-skill {
+  background: rgba(168, 85, 247, 0.14);
+  color: #c4a1ff;
+}
+
+.human-image-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
+}
+
+.human-image-indicator svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.skill-autocomplete {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% - 2px);
+  max-height: min(42vh, 280px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.35);
+  z-index: 40;
+  overflow: hidden;
+}
+
+.skill-autocomplete-header {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.skill-autocomplete-list {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.skill-autocomplete-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.skill-autocomplete-item:active,
+.skill-autocomplete-item:hover {
+  background: var(--bg-hover);
+}
+
+.skill-autocomplete-empty {
+  padding: 14px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.sheet-item-skill-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.sheet-item-skill-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.sheet-item-skill-desc {
+  font-size: 11px;
+  color: var(--text-tertiary, var(--text-secondary));
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .human-text {
   font-size: 13px;
   line-height: 1.5;
@@ -1937,6 +2042,7 @@ header {
 /* --- Input Bar --- */
 
 #input-bar {
+  position: relative;
   padding: 8px 12px;
   padding-bottom: max(8px, env(safe-area-inset-bottom));
   background: var(--bg-secondary);
@@ -3003,6 +3109,10 @@ header {
 
 .git-review-sheet {
   max-height: min(85dvh, 720px);
+  display: flex;
+  flex-direction: column;
+  /* Override .bottom-sheet overflow-y: auto — only .git-file-list scrolls. */
+  overflow: hidden;
 }
 
 .git-review-header {
@@ -3010,6 +3120,7 @@ header {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .git-review-header-actions {
@@ -3032,6 +3143,7 @@ header {
   padding: 8px 16px;
   font-size: 13px;
   opacity: 0.85;
+  flex-shrink: 0;
 }
 
 .git-review-count {
@@ -3043,6 +3155,7 @@ header {
   gap: 8px;
   overflow-x: auto;
   padding: 0 16px 8px;
+  flex-shrink: 0;
 }
 
 .git-repo-chip {
@@ -3065,6 +3178,7 @@ header {
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
   padding: 0 16px 10px;
+  flex-shrink: 0;
 }
 
 .git-segment {
@@ -3081,6 +3195,24 @@ header {
   background: rgba(100, 180, 255, 0.1);
 }
 
+.git-view-segment-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 0 16px 10px;
+  flex-shrink: 0;
+}
+
+.git-file-content {
+  margin: 0;
+  padding: 0 16px 16px;
+  font-family: var(--font-editor);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .git-conflict-alert {
   margin: 0 16px 8px;
   padding: 8px 10px;
@@ -3088,11 +3220,15 @@ header {
   background: rgba(255, 120, 80, 0.12);
   border: 1px solid rgba(255, 120, 80, 0.35);
   font-size: 12px;
+  flex-shrink: 0;
 }
 
 .git-file-list {
-  max-height: 50dvh;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .git-file-row {

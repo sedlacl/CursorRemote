@@ -37,6 +37,33 @@ describe('subagent stop resolver', () => {
     });
   });
 
+  it('finds stop via data-subagent-task-action on current Cursor cards', () => {
+    withDom(`
+      <div id="container" data-composer-id="composer-new-stop">
+        <div data-tool-call-id="call_new_stop">
+          <div data-subagent-task-card="true">
+            <div data-subagent-task-card-header="true" role="button">
+              <span>Probe worker</span>
+              <span data-subagent-task-model="true">Explorer</span>
+              <button type="button" data-subagent-task-action="stop">Stop</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `, (document) => {
+      const result = resolveSubagentStopElement(document, {
+        stop: {
+          kind: 'cardStop',
+          matchTitle: 'Probe worker',
+          matchModel: 'Explorer',
+          toolCallId: 'call_new_stop',
+        },
+      });
+      assert.equal(result.ok, true);
+      assert.equal(result.element?.getAttribute('data-subagent-task-action'), 'stop');
+    });
+  });
+
   it('rejects ambiguous toolbar stop when two jobs share the same title', () => {
     withDom(`
       <div id="composer-toolbar-section">

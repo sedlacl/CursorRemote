@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { GitActionRequest, GitActionResult, GitFileBucket } from '../../src/shared/git-scm.js';
 import type { GitDiffStageView } from '../../src/shared/git-scm.js';
+import { GIT_FILE_CONTENT_MAX_BYTES } from '../../src/shared/git-scm.js';
 import { buildNewFileUnifiedDiff } from '../../src/shared/git-diff-parser.js';
 import { repoIdFromRootUri } from '../../src/shared/git-repo-id.js';
 import { resolveRepositories, type GitRepoLike } from '../../src/shared/git-snapshot.js';
@@ -47,6 +48,8 @@ export class GitActionExecutor {
           return { ...base, ok: true };
         case 'diff':
           return await this.executeDiff(request, base);
+        case 'content':
+          return await this.executeContent(request, base);
         case 'stage':
           return await this.executeStage(request, base, true);
         case 'unstage':
@@ -321,6 +324,52 @@ export class GitActionExecutor {
       diffText: buildNewFileUnifiedDiff(relativePath, content),
       isBinary: false,
     };
+  }
+
+  private async executeContent(
+    request: GitActionRequest,
+    base: GitActionResult,
+  ): Promise<GitActionResult> {
+    if (!request.repoId || !request.path) {
+      return { ...base, error: 'Missing repoId or path' };
+    }
+    const repo = this.resolveRepo(request.repoId);
+    if (!repo) {
+      return { ...base, error: 'Repository not found' };
+    }
+
+    const relativePath = this.normalizeRepoPath(String(request.path));
+    try {
+      const uri = this.pathToUri(repo, relativePath);
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      if (this.looksBinary(bytes)) {
+        return {
+          ...base,
+          ok: true,
+          isBinary: true,
+          contentText: '',
+          byteLength: bytes.length,
+          truncated: false,
+        };
+      }
+
+      const truncated = bytes.length > GIT_FILE_CONTENT_MAX_BYTES;
+      const slice = truncated ? bytes.subarray(0, GIT_FILE_CONTENT_MAX_BYTES) : bytes;
+      const contentText = new TextDecoder('utf-8').decode(slice);
+      return {
+        ...base,
+        ok: true,
+        isBinary: false,
+        contentText,
+        byteLength: bytes.length,
+        truncated,
+      };
+    } catch (err) {
+      return {
+        ...base,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   }
 
   private async executeDiff(

@@ -82,6 +82,8 @@ export function createMockUiState(overrides: Partial<UiState & UiActions> = {}):
     planModalBody: '',
     toasts: [],
     backgroundTaskContext: null,
+    gitDiffFile: null,
+    pendingSkillInsert: null,
     openSheet: () => undefined,
     closeSheet: () => undefined,
     openQueueSheet: () => undefined,
@@ -92,6 +94,11 @@ export function createMockUiState(overrides: Partial<UiState & UiActions> = {}):
     setPlanModalBody: () => undefined,
     showToast: () => undefined,
     removeToast: () => undefined,
+    openGitSheet: () => undefined,
+    openGitDiff: () => undefined,
+    closeGitDiff: () => undefined,
+    requestSkillInsert: () => undefined,
+    clearPendingSkillInsert: () => undefined,
     ...overrides,
   };
 }

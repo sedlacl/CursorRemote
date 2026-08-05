@@ -6,13 +6,19 @@ export function getVisibleBackgroundTasks(state: CursorState): BackgroundTask[] 
   return state.backgroundTasks || [];
 }
 
+const summaryRe = /^(\d+)\s+background\s+(?:terminal|task)s?$/i;
+const waitingRe = /^Waiting for (\d+) commands? to finish$/i;
+
 export function isForegroundWaitingBackgroundTask(task: BackgroundTask): boolean {
-  return /^Waiting for \d+ commands? to finish$/i.test(task.label.trim());
+  return waitingRe.test(task.label.trim());
+}
+
+/** Collapsed Cursor chrome row like `2 background tasks` — an aggregate, not an individual job. */
+export function isSummaryBackgroundTask(task: BackgroundTask): boolean {
+  return summaryRe.test(task.label.trim());
 }
 
 export function getBackgroundTaskCount(tasks: BackgroundTask[]): number {
-  const summaryRe = /^(\d+)\s+background\s+(?:terminal|task)s?$/i;
-  const waitingRe = /^Waiting for (\d+) commands? to finish$/i;
   let maxSummaryCount = 0;
   let maxWaitingCount = 0;
   let detailedCount = 0;
@@ -38,6 +44,34 @@ export function getBackgroundTaskCount(tasks: BackgroundTask[]): number {
 
 export function getBackgroundTasksForSheet(tasks: BackgroundTask[]): BackgroundTask[] {
   return tasks.filter(task => !isForegroundWaitingBackgroundTask(task));
+}
+
+export interface BackgroundTasksSheetModel {
+  /** Individual jobs only; aggregate summary rows are never listed. */
+  rows: BackgroundTask[];
+  /** How many jobs Cursor claims exist, from collapsed summary rows. */
+  summaryCount: number;
+  /** Present while Cursor keeps the job list collapsed behind a chevron. */
+  expandSelectorPath?: string;
+  /** Cursor reports more jobs than we can list, so the list is known to be partial. */
+  incomplete: boolean;
+}
+
+export function getBackgroundTasksSheetModel(tasks: BackgroundTask[]): BackgroundTasksSheetModel {
+  const visible = getBackgroundTasksForSheet(tasks);
+  const rows = visible.filter(task => !isSummaryBackgroundTask(task));
+  const summaryRows = visible.filter(isSummaryBackgroundTask);
+  const summaryCount = summaryRows.reduce((max, task) => {
+    const match = task.label.trim().match(summaryRe);
+    return match ? Math.max(max, parseInt(match[1], 10)) : max;
+  }, 0);
+
+  return {
+    rows,
+    summaryCount,
+    expandSelectorPath: summaryRows.find(task => task.expandSelectorPath)?.expandSelectorPath,
+    incomplete: summaryCount > rows.length,
+  };
 }
 
 function gitStatusFromScm(scm: GitScmSnapshot): GitStatusInfo {

@@ -4,6 +4,7 @@ import type {
   GitDiffResponse,
   GitDiffStageView,
   GitFileBucket,
+  GitFileContentResponse,
   GitFileSummary,
   GitScmSnapshot,
   GitStageResponse,
@@ -215,6 +216,65 @@ export class GitScmService {
         remainingHunks: page.remainingHunks,
         nextHunkCursor: page.nextHunkCursor,
       },
+    };
+  }
+
+  async getContent(options: {
+    fileId: string;
+    snapshotId?: string;
+  }): Promise<GitFileContentResponse> {
+    const snapshot = this.getSnapshot();
+    if (!snapshot) {
+      throw new Error('No git snapshot available');
+    }
+    if (options.snapshotId && options.snapshotId !== snapshot.snapshotId) {
+      throw new Error(GIT_SNAPSHOT_STALE_ERROR);
+    }
+
+    const file = findFileInSnapshot(snapshot, options.fileId);
+    if (!file) {
+      throw new Error('Unknown fileId');
+    }
+
+    if (file.isBinary) {
+      return {
+        snapshotId: snapshot.snapshotId,
+        repoId: file.repoId,
+        fileId: file.fileId,
+        path: file.path,
+        language: languageFromPath(file.path),
+        isBinary: true,
+        isLarge: file.isLarge,
+        truncated: false,
+        content: '',
+        byteLength: 0,
+      };
+    }
+
+    const actionResult = await this.extensionBridge.requestGitAction({
+      requestId: `content-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      requestedAt: Date.now(),
+      action: 'content',
+      repoId: file.repoId,
+      path: file.path,
+      bucket: file.bucket,
+    });
+    if (!actionResult.ok) {
+      throw new Error(actionResult.error || 'Content request failed');
+    }
+
+    const isBinary = actionResult.isBinary === true;
+    return {
+      snapshotId: snapshot.snapshotId,
+      repoId: file.repoId,
+      fileId: file.fileId,
+      path: file.path,
+      language: languageFromPath(file.path),
+      isBinary,
+      isLarge: file.isLarge || actionResult.truncated === true,
+      truncated: actionResult.truncated === true,
+      content: isBinary ? '' : (actionResult.contentText ?? ''),
+      byteLength: actionResult.byteLength ?? 0,
     };
   }
 

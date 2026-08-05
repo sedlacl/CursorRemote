@@ -283,8 +283,25 @@ export class CommandExecutor {
           await sleep(50);
         }
 
-        await client.typeText(trimmed);
-        console.log(`[command-executor] Text inserted via Input.insertText (${trimmed.length} chars)`);
+        // Prefer resolved skill names from own UI (`/remote-cursor …`). Typing the
+        // slash token then a space lets Cursor Lexical create a cursor_skill chip
+        // when the name matches (probe-verified); wrong names stay plain text.
+        const skillMatch = trimmed.match(/^\/([^\s]+)(\s+)([\s\S]*)$/);
+        if (skillMatch) {
+          const skillToken = `/${skillMatch[1]}`;
+          const rest = skillMatch[3] || '';
+          await client.typeText(skillToken);
+          await sleep(80);
+          await client.typeText(' ');
+          await sleep(120);
+          if (rest) {
+            await client.typeText(rest);
+          }
+          console.log(`[command-executor] Text inserted with skill token ${skillToken} (${trimmed.length} chars)`);
+        } else {
+          await client.typeText(trimmed);
+          console.log(`[command-executor] Text inserted via Input.insertText (${trimmed.length} chars)`);
+        }
         await sleep(150);
       }
 

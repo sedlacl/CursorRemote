@@ -50,11 +50,15 @@ export function GitReviewSheet({ state, visible }: GitReviewSheetProps) {
   const [loading, setLoading] = useState(false);
 
   const activeRepoId = selectedRepoId ?? repos[0]?.repoId ?? null;
+  const activeRepo = useMemo(
+    () => repos.find(item => item.repoId === activeRepoId) ?? null,
+    [activeRepoId, repos],
+  );
 
-  const counts = useMemo(() => {
-    const repo = repos.find(item => item.repoId === activeRepoId);
-    return repo?.counts ?? { staged: 0, changes: 0, conflicts: 0, untracked: 0 };
-  }, [activeRepoId, repos]);
+  const counts = useMemo(
+    () => activeRepo?.counts ?? { staged: 0, changes: 0, conflicts: 0, untracked: 0 },
+    [activeRepo],
+  );
 
   const loadFiles = useCallback(async () => {
     if (!visible) return;
@@ -154,7 +158,10 @@ export function GitReviewSheet({ state, visible }: GitReviewSheetProps) {
 
       {gitStatus && (
         <div className="git-review-summary">
-          <span>{gitStatus.repoLabel || 'Repository'}</span>
+          <span>
+            {gitStatus.repoLabel || activeRepo?.label || 'Repository'}
+            {activeRepo?.branch ? ` · ${activeRepo.branch}` : ''}
+          </span>
           <span className="git-review-count">F:{gitStatus.changedCount}</span>
         </div>
       )}

@@ -49,6 +49,20 @@ export interface DiagnosticStateSnapshot {
   mode: CursorState['mode'];
   model: CursorState['model'];
   gitStatus: CursorState['gitStatus'];
+  /** Sanitized Multitask workers (no `_capabilities` / selector paths). */
+  subagents: {
+    runningCount: number;
+    summary: string;
+    items: Array<{
+      id: string;
+      title: string;
+      model?: string;
+      status: string;
+      statusText?: string;
+      openAvailable: boolean;
+      stopAvailable: boolean;
+    }>;
+  };
   diagnostics: Pick<
     ServerDiagnostics,
     'server' | 'connected' | 'generation' | 'uptime' | 'clients' | 'activeWindowTitle' | 'cdpUrl'
@@ -200,6 +214,19 @@ export class DiagnosticSnapshotService {
       mode: state.mode,
       model: state.model,
       gitStatus: state.gitStatus,
+      subagents: {
+        runningCount: state.subagents?.runningCount ?? 0,
+        summary: state.subagents?.summary ?? '',
+        items: (state.subagents?.items ?? []).map((item) => ({
+          id: item.id,
+          title: item.title,
+          ...(item.model ? { model: item.model } : {}),
+          status: item.status,
+          ...(item.statusText ? { statusText: item.statusText } : {}),
+          openAvailable: !!item.openAvailable,
+          stopAvailable: !!item.stopAvailable,
+        })),
+      },
       diagnostics: {
         server: diagnostics.server,
         connected: diagnostics.connected,

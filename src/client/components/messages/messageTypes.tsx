@@ -76,6 +76,7 @@ export function HumanMessage({
   message: Extract<ChatElement, { type: 'human' }>;
   showRoleLabel?: boolean;
 }) {
+  const imageCount = message.imageCount ?? 0;
   return (
     <div className="chat-el el-human" data-id={message.id} data-msg-type={message.type}>
       {showRoleLabel && <div className="message-role-label">You</div>}
@@ -89,8 +90,23 @@ export function HumanMessage({
         {!!message.mentions?.length && (
           <div className="mentions-row">
             {message.mentions.map((mention, idx) => (
-              <span key={`${mention.name}:${idx}`} className="mention-badge">{mention.name}</span>
+              <span
+                key={`${mention.name}:${idx}`}
+                className={`mention-badge${mention.mentionType === 'cursor_skill' ? ' mention-badge-skill' : ''}`}
+              >
+                {mention.mentionType === 'cursor_skill' && !mention.name.startsWith('/') ? `/${mention.name}` : mention.name}
+              </span>
             ))}
+          </div>
+        )}
+        {imageCount > 0 && (
+          <div className="human-image-indicator" aria-label={`${imageCount} image${imageCount === 1 ? '' : 's'} attached`}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <circle cx="8.5" cy="10" r="1.5" fill="currentColor" stroke="none" />
+              <path d="M21 16l-5.5-5.5a1.5 1.5 0 0 0-2.12 0L3 18" />
+            </svg>
+            <span>{imageCount === 1 ? '1 image' : `${imageCount} images`}</span>
           </div>
         )}
         <div className="human-text">{message.text}</div>

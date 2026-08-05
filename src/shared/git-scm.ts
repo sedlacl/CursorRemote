@@ -87,6 +87,20 @@ export interface GitDiffResponse {
   };
 }
 
+/** Working-tree file text for the Diff | File viewer (read-only). */
+export interface GitFileContentResponse {
+  snapshotId: string;
+  repoId: string;
+  fileId: string;
+  path: string;
+  language: string;
+  isBinary: boolean;
+  isLarge: boolean;
+  truncated: boolean;
+  content: string;
+  byteLength: number;
+}
+
 export interface GitStageRequest {
   fileIds: string[];
   requestId?: string;
@@ -106,7 +120,7 @@ export const GIT_SNAPSHOT_STALE_ERROR = 'Stale git snapshot';
 export interface GitActionRequest {
   requestId: string;
   requestedAt: number;
-  action: 'diff' | 'stage' | 'unstage' | 'refresh';
+  action: 'diff' | 'content' | 'stage' | 'unstage' | 'refresh';
   repoId?: string;
   path?: string;
   paths?: string[];
@@ -122,9 +136,15 @@ export interface GitActionResult {
   error?: string;
   debug?: string[];
   diffText?: string;
+  contentText?: string;
+  truncated?: boolean;
+  byteLength?: number;
   isBinary?: boolean;
   affected?: string[];
 }
+
+/** Soft cap for mobile file preview payloads. */
+export const GIT_FILE_CONTENT_MAX_BYTES = 512 * 1024;
 
 export const GIT_ACTION_REQUEST_FILENAME = 'git-action-request.json';
 export const GIT_ACTION_RESULT_FILENAME = 'git-action-result.json';

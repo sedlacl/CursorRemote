@@ -1,4 +1,10 @@
-import type { GitDiffResponse, GitFileBucket, GitFileSummary, GitRepoSummary } from '../../shared/git-scm.js';
+import type {
+  GitDiffResponse,
+  GitFileBucket,
+  GitFileContentResponse,
+  GitFileSummary,
+  GitRepoSummary,
+} from '../../shared/git-scm.js';
 import { getAuthToken } from '../state/socketClient.js';
 
 async function gitFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -55,6 +61,16 @@ export async function fetchGitDiff(
   if (options?.snapshotId) params.set('snapshotId', options.snapshotId);
   const query = params.toString();
   return gitFetch(`/api/git/files/${encodeURIComponent(fileId)}/diff${query ? `?${query}` : ''}`);
+}
+
+export async function fetchGitFileContent(
+  fileId: string,
+  options?: { snapshotId?: string },
+): Promise<GitFileContentResponse> {
+  const params = new URLSearchParams();
+  if (options?.snapshotId) params.set('snapshotId', options.snapshotId);
+  const query = params.toString();
+  return gitFetch(`/api/git/files/${encodeURIComponent(fileId)}/content${query ? `?${query}` : ''}`);
 }
 
 async function gitMutation<T extends { ok: boolean; error?: string }>(
