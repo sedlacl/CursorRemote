@@ -4,6 +4,11 @@ All notable changes to CursorRemote are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.9] - 2026-08-07
+
+### Fixed
+- **Release CI `npm ci` E401 (Nexus)**: `html-to-image` was locked to a corporate Plus4U Nexus URL from a local npm registry override, so GitHub Actions could not authenticate. The lockfile now resolves it from `registry.npmjs.org`, the project `.npmrc` pins that public registry, and the release workflow runs `npm ci --registry=https://registry.npmjs.org/`.
+
 ## [0.3.8] - 2026-08-07
 
 ### Changed
