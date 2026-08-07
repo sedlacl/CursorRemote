@@ -4,6 +4,11 @@ All notable changes to CursorRemote are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.10] - 2026-08-07
+
+### Fixed
+- **Project `.npmrc` pins public npm registry**: added `replace-registry-host=always` alongside the explicit `registry=https://registry.npmjs.org/` so `npm install` / `npm ci` always write `registry.npmjs.org` tarball URLs into the lockfile, even when a developer's global `~/.npmrc` defaults to a corporate registry (Nexus / Plus4U). This prevents private-registry URLs from leaking back into `package-lock.json` and breaking Release CI again.
+
 ## [0.3.9] - 2026-08-07
 
 ### Fixed
