@@ -108,6 +108,21 @@ curl -s -H "Authorization: Bearer $DIAGNOSTIC_TOKEN" \
 
 Only **one** snapshot operation runs at a time per relay (shared with DOM export busy lock on export path).
 
+## Capture UI report (`POST /debug/ui-report`)
+
+From the web Debug sheet, **Report** hides the Debug sheet, captures a web-client viewport
+screenshot, prompts for a short required description (`note`), then posts the page DOM,
+optional `webScreenshotPngBase64`, and client meta to the relay. Same auth as
+`/debug/snapshot`. The server then captures Cursor DOM (chat + document), a Cursor window
+screenshot, and sanitized state, and writes:
+
+- `docs/issues/YYYY-MM-DD-ui-report-<issueId>.md` (tracked stub; Symptom / User note from `note`)
+- `docs/issues/.artifacts/<issueId>/` (gitignored: `web-dom.html`, `web-screenshot.png`,
+  `state.json`, `cursor-dom-*.html`, `cursor-screenshot.png`, `meta.json`)
+
+Response JSON includes `issueId`, `issuePath`, `artifactsDir`, `agentPrompt`, and `warnings`
+(partial capture failures do not abort the issue write; missing web screenshot becomes a warning).
+
 ## Environment
 
 ```env

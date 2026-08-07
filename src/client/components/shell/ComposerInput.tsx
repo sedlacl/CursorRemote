@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActiveConversationContext, CursorState, SkillOption } from '../../../server/types.js';
 import { modeUi } from '../../constants/modeOptions.js';
+import { ModeIcon } from '../icons/ModeIcon.js';
 import { useTextareaAutosize } from '../../hooks/useTextareaAutosize.js';
 import { useCommandClient } from '../../state/commandClient.js';
 import { useUiState } from '../../state/uiState.js';
@@ -258,7 +259,7 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
       />
       <div id="mode-model-bar" className="mode-model-bar">
         <button id="pill-mode" className="pill" aria-label="Select mode" onClick={() => ui.openSheet('mode')}>
-          <span id="pill-mode-icon" className="pill-icon">{currentMode.icon}</span>
+          <span id="pill-mode-icon" className="pill-icon"><ModeIcon modeId={currentMode.id} size={14} /></span>
           <span id="pill-mode-text">{currentMode.label}</span>
           <span className="pill-chevron">&#9662;</span>
         </button>

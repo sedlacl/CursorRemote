@@ -91,6 +91,75 @@ describe('approval extraction detail', () => {
       [['approve', 'Run'], ['reject', 'Skip']],
     );
   });
+
+  it('does not treat Allow as command when shell command text is missing', () => {
+    const html = `
+      <div id="container" data-composer-id="composer-a">
+        <button type="button" aria-label="Allow">Allow</button>
+        <button type="button" class="ui-shell-tool-call__skip-btn">Skip</button>
+      </div>
+    `;
+    const dom = new JSDOM(html);
+    const previous = {
+      document: (globalThis as { document?: Document }).document,
+      Element: (globalThis as { Element?: typeof Element }).Element,
+      HTMLElement: (globalThis as { HTMLElement?: typeof HTMLElement }).HTMLElement,
+      Node: (globalThis as { Node?: typeof Node }).Node,
+    };
+    Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true });
+    Object.defineProperty(globalThis, 'Element', { value: dom.window.Element, configurable: true });
+    Object.defineProperty(globalThis, 'HTMLElement', { value: dom.window.HTMLElement, configurable: true });
+    Object.defineProperty(globalThis, 'Node', { value: dom.window.Node, configurable: true });
+    let state: CursorState;
+    try {
+      const extracted = extractionFunction(
+        ['#container'],
+        ["button[aria-label*='Allow']"],
+        ['Allow', 'Run'],
+        ['button.ui-shell-tool-call__skip-btn'],
+        ['Skip'],
+        [],
+        [],
+        [],
+        [],
+        [],
+      );
+      assert.ok(extracted);
+      state = extracted;
+    } finally {
+      Object.defineProperty(globalThis, 'document', { value: previous.document, configurable: true });
+      Object.defineProperty(globalThis, 'Element', { value: previous.Element, configurable: true });
+      Object.defineProperty(globalThis, 'HTMLElement', { value: previous.HTMLElement, configurable: true });
+      Object.defineProperty(globalThis, 'Node', { value: previous.Node, configurable: true });
+      dom.window.close();
+    }
+
+    assert.equal(state.pendingApprovals.length, 1);
+    const approval = state.pendingApprovals[0];
+    assert.ok(approval);
+    assert.notEqual(approval.description, 'Allow');
+    assert.equal(approval.description, 'Command pending approval');
+    assert.equal(approval.command, undefined);
+    assert.ok(
+      approval.actions.some((a) => a.type === 'approve' && /allow/i.test(a.label)),
+    );
+
+    // Mirror ApprovalBar displayTitle/displayCommand: approve labels must not
+    // become the title or `$ …` command preview when command text is missing.
+    const isApproveLabel = (label: string) =>
+      /^(accept|approve|run|allow|accept all)$/i.test(label.replace(/\s+/g, ' ').trim());
+    const displayTitle = approval.title?.trim()
+      && !isApproveLabel(approval.title.trim())
+      ? approval.title.trim()
+      : (approval.description?.trim() && !isApproveLabel(approval.description.trim())
+        ? approval.description.trim()
+        : 'Command pending approval');
+    const displayCommand = approval.command?.trim() && !isApproveLabel(approval.command.trim())
+      ? approval.command.trim()
+      : '';
+    assert.equal(displayTitle, 'Command pending approval');
+    assert.equal(displayCommand, '');
+  });
 });
 
 describe('approval provenance filtering', () => {

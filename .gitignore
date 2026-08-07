@@ -8,6 +8,7 @@ data/
 releases/
 temp/
 tmp/
+docs/issues/.artifacts/
 scripts/generate-keys.ts
 azure_token
 openvsx_token

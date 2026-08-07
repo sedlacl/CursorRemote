@@ -30,11 +30,17 @@ export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
   const [gitDiffFile, setGitDiffFile] = useState<GitFileSummary | null>(null);
 
   const showToast = useCallback((message: string, type?: 'success' | 'error') => {
-    const id = newCommandId();
-    setToasts(items => [...items, { id, message, type }]);
-    window.setTimeout(() => {
-      setToasts(items => items.filter(item => item.id !== id));
-    }, 3500);
+    setToasts(items => {
+      const last = items[items.length - 1];
+      if (last && last.message === message && last.type === type) {
+        return items;
+      }
+      const id = newCommandId();
+      window.setTimeout(() => {
+        setToasts(current => current.filter(item => item.id !== id));
+      }, 3500);
+      return [...items, { id, message, type }];
+    });
   }, []);
 
   useEffect(() => {

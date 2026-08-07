@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { useUiState } from '../../state/uiState.js';
+import { copyToClipboard } from '../../utils/clipboard.js';
 
 export interface DiagnosticIdBadgeProps {
   diagnosticId?: string | null;
@@ -12,14 +13,19 @@ export function DiagnosticIdBadge({ diagnosticId }: DiagnosticIdBadgeProps) {
 
   const copyId = useCallback(async () => {
     if (!id) return;
-    try {
-      await navigator.clipboard.writeText(id);
+    const result = await copyToClipboard(id);
+    if (result.ok) {
       setCopied(true);
       ui.showToast(`Diagnostic ID copied: ${id}`, 'success');
       window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      ui.showToast('Copy failed', 'error');
+      return;
     }
+    ui.showToast(
+      result.shownManualFallback
+        ? 'Copy failed — select text manually'
+        : 'Copy failed',
+      'error',
+    );
   }, [id, ui]);
 
   if (!id) return null;

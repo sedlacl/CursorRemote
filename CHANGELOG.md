@@ -4,6 +4,22 @@ All notable changes to CursorRemote are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.8] - 2026-08-07
+
+### Changed
+- **Mode picker icons match Cursor**: the Mode bottom sheet and composer mode pill use thin monochrome SVG icons (infinity, plan list, bug outline, layered arc, chat bubble) instead of emoji and character glyphs, inheriting text color like native Cursor.
+- **Debug Report asks for a description and captures a web screenshot**: tapping **Report** closes the Debug sheet, snapshots the web-client viewport via `html-to-image` (diagnostic ID badge stays visible; Debug sheet hidden), then prompts for a short required note. The POST includes `note` + optional `webScreenshotPngBase64`; the server writes `web-screenshot.png`, fills Symptom / User note, and continues with a warning if the web screenshot is unavailable.
+
+## [0.3.7] - 2026-08-06
+
+### Added
+- **Debug Report button (Capture UI report & issue)**: one tap in the Debug sheet posts the web client DOM to `POST /debug/ui-report` (session / `DIAGNOSTIC_TOKEN` auth). The relay captures Cursor chat+document DOM, a window screenshot, and sanitized state, then writes `docs/issues/YYYY-MM-DD-ui-report-<issueId>.md` plus gitignored artifacts under `docs/issues/.artifacts/<issueId>/`. Toast shows the issue path (or a clear error).
+
+### Fixed
+- **Copy on HTTP LAN / iPhone**: Debug **Copy JSON** and the diagnostic ID badge no longer fail with “Copy failed” when the client is opened over plain `http://` on a LAN IP (non-secure context — `navigator.clipboard` is unavailable). A shared `copyToClipboard` helper feature-detects the Clipboard API, falls back to an iOS-safe `execCommand('copy')` path, and as a last resort shows a selectable text sheet. Identical consecutive toasts are also deduped.
+- **Approval card no longer shows `$ Allow`**: when Cursor’s shell command text is missing (common for Allow / Auto-review approvals), the extractor and ApprovalBar no longer treat approve-button labels (`Allow`, `Run`, `Accept`, …) as the command or card title. The command preview is hidden until real command text is available. Bare **Allow** is also no longer mis-tagged as `approve_all` (substring `all`).
+- **Model sheet lists real models again**: the model picker collector ignores Effort / Fast settings rows and opens the Model submenu before reading or selecting. `state.model.current` also skips Effort badges like `High` so the composer trigger shows the model name when present.
+
 ## [0.3.6] - 2026-08-05
 
 ### Added

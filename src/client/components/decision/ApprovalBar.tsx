@@ -7,6 +7,12 @@ function isGarbageActionLabel(label: string): boolean {
   return !label || /^accept$/i.test(label.trim());
 }
 
+/** Approve-button labels — never show these as the shell command preview. */
+function isApproveActionLabel(label: string): boolean {
+  const norm = label.replace(/\s+/g, ' ').trim().toLowerCase();
+  return /^(accept|approve|run|allow|accept all)$/i.test(norm);
+}
+
 function firstLocalApproval(state: CursorState): Approval | null {
   const { pendingApprovals = [], activeComposerId, activeWindowId } = state;
   return pendingApprovals.find((approval) => {
@@ -23,15 +29,25 @@ function firstLocalApproval(state: CursorState): Approval | null {
 }
 
 function displayTitle(approval: Approval): string {
-  return approval.title?.trim()
-    || approval.description?.trim()
-    || 'Command pending approval';
+  const title = approval.title?.trim() || '';
+  if (title && !isApproveActionLabel(title)) return title;
+  const description = approval.description?.trim() || '';
+  if (description && !isApproveActionLabel(description)) return description;
+  return 'Command pending approval';
 }
 
 function displayCommand(approval: Approval): string {
-  return approval.command?.trim()
-    || (approval.description !== approval.title ? approval.description : '')
-    || '';
+  const command = approval.command?.trim() || '';
+  if (command && !isApproveActionLabel(command)) return command;
+  const description = approval.description?.trim() || '';
+  if (
+    description
+    && description !== approval.title?.trim()
+    && !isApproveActionLabel(description)
+  ) {
+    return description;
+  }
+  return '';
 }
 
 export function ApprovalBar({ state }: { state: CursorState }) {

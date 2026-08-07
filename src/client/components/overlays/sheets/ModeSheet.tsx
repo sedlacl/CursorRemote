@@ -2,6 +2,7 @@ import React from 'react';
 import type { CursorState } from '../../../../server/types.js';
 import { setMode } from '../../../actions/sheetActions.js';
 import { MODE_OPTIONS } from '../../../constants/modeOptions.js';
+import { ModeIcon } from '../../icons/ModeIcon.js';
 import { useCommandClient } from '../../../state/commandClient.js';
 import { useUiState } from '../../../state/uiState.js';
 
@@ -29,7 +30,7 @@ export function ModeSheet({ state, visible }: ModeSheetProps) {
               ui.showToast(`Mode: ${mode.label}`, 'success');
             }}
           >
-            <span className="sheet-item-icon">{mode.icon}</span>
+            <span className="sheet-item-icon"><ModeIcon modeId={mode.id} size={20} /></span>
             <span>{mode.label}</span>
             {mode.id === current && <span className="sheet-item-check">✓</span>}
           </button>

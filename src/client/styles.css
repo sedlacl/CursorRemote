@@ -2549,7 +2549,12 @@ header {
 .pill:active { background: var(--bg-hover); }
 
 .pill-icon {
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
   line-height: 1;
   opacity: 0.7;
 }
@@ -2701,6 +2706,12 @@ header {
 .debug-export-danger {
   border-color: rgba(227, 70, 113, 0.38);
   color: var(--accent-red);
+}
+
+.debug-report-btn {
+  border-color: rgba(88, 166, 255, 0.45);
+  color: var(--accent-blue, #58a6ff);
+  font-weight: 600;
 }
 
 .debug-action-btn:disabled {
@@ -2891,6 +2902,12 @@ header {
   flex-shrink: 0;
   font-size: 14px;
   opacity: 0.75;
+}
+
+.sheet-item-icon svg,
+.pill-icon svg {
+  display: block;
+  flex-shrink: 0;
 }
 
 .sheet-item-danger .sheet-item-icon {
@@ -3495,5 +3512,172 @@ header {
   .messages-diagnostic-anchor {
     padding: 0 max(16px, calc((100% - 800px) / 2 + 10px));
   }
+}
+
+/* Last-resort clipboard UI when Clipboard API + execCommand both fail (e.g. locked-down WebViews). */
+.clipboard-manual-fallback {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.clipboard-manual-fallback-panel {
+  width: min(100%, 480px);
+  max-height: min(70vh, 520px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 12px 12px 0 0;
+  background: var(--bg-secondary, #252526);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-primary, #e4e4e4);
+  box-sizing: border-box;
+}
+
+.clipboard-manual-fallback-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.clipboard-manual-fallback-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-secondary, #9d9d9d);
+}
+
+.clipboard-manual-fallback-text {
+  flex: 1;
+  min-height: 120px;
+  max-height: 40vh;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--bg-primary, #1e1e1e);
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.clipboard-manual-fallback-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.clipboard-manual-fallback-btn {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.clipboard-manual-fallback-btn--primary {
+  background: #3794ff;
+  border-color: #3794ff;
+  color: #fff;
+}
+
+/* --- UI report note dialog --- */
+
+.report-note-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 10060;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.report-note-dialog-panel {
+  width: min(100%, 480px);
+  max-height: min(80vh, 560px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 12px 12px 0 0;
+  background: var(--bg-secondary, #252526);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-primary, #e4e4e4);
+  box-sizing: border-box;
+}
+
+.report-note-dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.report-note-dialog-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-secondary, #9d9d9d);
+}
+
+.report-note-dialog-text {
+  flex: 1;
+  min-height: 100px;
+  max-height: 36vh;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--bg-primary, #1e1e1e);
+  color: inherit;
+  font-family: inherit;
+  font-size: 16px; /* avoid iOS focus zoom */
+  line-height: 1.4;
+}
+
+.report-note-dialog-error {
+  font-size: 12px;
+  color: #f48771;
+}
+
+.report-note-dialog-error.hidden {
+  display: none;
+}
+
+.report-note-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.report-note-dialog-btn {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.report-note-dialog-btn--primary {
+  background: #3794ff;
+  border-color: #3794ff;
+  color: #fff;
 }
 

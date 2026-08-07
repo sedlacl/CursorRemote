@@ -1,0 +1,79 @@
+---
+description: Standardní smyčka — projdi docs/issues, oprav, changelog, smaž vyřešené
+globs: docs/issues/**
+alwaysApply: false
+---
+
+# Issue workflow
+
+Standardní postup pro nahlášené bugy v `docs/issues/`. Formát souborů a `.artifacts/` viz
+`docs/issues/README.md`.
+
+## Kdy
+
+- Uživatel řekne **„projdi issues“**, **„oprav issues“** nebo podobně.
+- Pracuješ se soubory v `docs/issues/` (kromě `README.md`).
+
+## Smyčka
+
+### 1. Triage
+
+Načti všechny otevřené `*.md` v `docs/issues/` a roztřiď:
+
+| Typ | Kritérium |
+| --- | --- |
+| **Actionable** | Vyplněný Symptom + Evidence; sekce Likely cause / Suggested fix s konkrétním návrhem; u UI reportů artefakty v `.artifacts/<issueId>/`. |
+| **Non-actionable** | Šablona UI reportu („Fill in after inspecting…“, `_Pending agent analysis_`), chybí symptom i artefakty, nebo analýza bez návrhu fixu. |
+
+### 2. Implementace
+
+U actionable issues oprav podle **Likely cause** / **Suggested fix**. U DOM heuristik a selektorů
+platí `probe-before-parsing.mdc` — nejdřív probe, pak kód.
+
+### 3. Testy
+
+Podle `testing.mdc`: **1–3 cílené testy** jen kde dává smysl (parser, regrese); ne suite kvůli
+pocitu hotovo.
+
+### 4. Ověření
+
+- `npm test` + `npm run build` (viz `dev-workflow.mdc`).
+- Změna web UI → vizuální kontrola na `http://localhost:3001`.
+- Změna extension → upozorni uživatele před testy/buildem.
+
+### 5. Changelog
+
+User-facing fix → `changelog.mdc`: dated sekce, SemVer bump, **žádné `[Unreleased]`**, datum =
+den implementace. Stejný den = doplň do existující verze.
+
+### 6. Uklid (až po zelené verifikaci)
+
+Teprve když testy + build projdou (a u UI i vizuální kontrola):
+
+1. Smaž vyřešené issue `*.md`.
+2. Smaž `docs/issues/.artifacts/<issueId>/` u těchto issues.
+3. Aktualizuj sekci **Stav** v `docs/issues/README.md` (co smazáno, zda zbývají otevřené).
+
+Fix zůstává v kódu — issue soubor je jen triage, ne historie.
+
+### 7. Non-actionable reporty
+
+**Neopravovat naslepo.** Buď:
+
+- smazat jako non-actionable (uživatel souhlasí / explicitní pokyn), nebo
+- nechat otevřené a **explicitně oznámit** uživateli — chybí symptom, analýza nebo artefakty.
+
+## Co se nedělá
+
+- **Commit, push, release** — jen na výslovný pokyn uživatele.
+- Mazat issue **před** zelenými testy/buildem.
+- Vymýšlet příčinu bez artefaktů nebo probe.
+
+## Checklist
+
+- [ ] Issues roztříděny (actionable vs. non-actionable)
+- [ ] Fix podle Likely cause / Suggested fix; DOM → probe first
+- [ ] `npm test` + `npm run build` OK; web UI vizuálně OK
+- [ ] Changelog + verze podle `changelog.mdc`
+- [ ] Vyřešené issue + `.artifacts/` smazány; README Stav aktualizován
+- [ ] Non-actionable oznámeny nebo smazány se souhlasem

@@ -1,7 +1,7 @@
 {
   "name": "cursor-remote",
   "displayName": "QJohn CursorRemote (Dev)",
-  "version": "0.3.6",
+  "version": "0.3.8",
   "description": "Remote control your local Cursor AI agent — monitor, approve, and send tasks from your phone or Telegram.",
   "publisher": "cursor-remote-dev",
   "repository": {
@@ -270,6 +270,7 @@
     "dotenv": "^17.3.1",
     "express": "^4.21.0",
     "grammy": "^1.41.1",
+    "html-to-image": "^1.11.13",
     "node-html-parser": "^7.1.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

@@ -24,9 +24,12 @@ export function cleanTabTitle(raw: string): string {
 export {
   filterActionableApprovals,
   isActionableApproval,
+  isApproveActionLabel,
+  isApproveAllLabel,
   isBackgroundApprovalLabel,
   isGarbageActionLabel,
   looksLikeButtonLabel,
+  sanitizeApprovalCommandText,
 } from './approval-filter.js';
 
 /**
@@ -614,6 +617,26 @@ export function extractionFunction(
       if (/\bduration_ms\b/i.test(norm)) return true;
       if (/#\s*(cancelled|skipped|todo)\s+\d+/i.test(norm)) return true;
       return false;
+    }
+
+    // Keep in sync with approval-filter.ts APPROVE_ACTION_LABELS / isApproveActionLabel.
+    function isApproveActionLabel(label: string): boolean {
+      const norm = label.replace(/\s+/g, ' ').trim().toLowerCase();
+      return /^(accept|approve|run|allow|accept all)$/i.test(norm);
+    }
+
+    // Keep in sync with approval-filter.ts isApproveAllLabel — do not use
+    // includes('all') (that mis-classifies "Allow" as approve_all).
+    function isApproveAllLabel(label: string): boolean {
+      const norm = label.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (!norm) return false;
+      return /\b(accept|approve|allow)\s+all\b/.test(norm) || /^all$/i.test(norm);
+    }
+
+    function sanitizeApprovalCommandText(text: string): string {
+      const trimmed = (text || '').replace(/\s+/g, ' ').trim();
+      if (!trimmed || isApproveActionLabel(trimmed)) return '';
+      return trimmed;
     }
 
     function getButtonLabel(btn: Element): string {
@@ -1514,7 +1537,11 @@ export function extractionFunction(
         const headerText = (header.textContent || '').replace(/\s+/g, ' ').trim();
         const withoutCmd = cmdText ? headerText.replace(cmdText, '').trim() : headerText;
         const withoutPolicy = withoutCmd.replace(/auto-review/gi, '').trim();
-        if (withoutPolicy && withoutPolicy.length > 3 && !/^run$/i.test(withoutPolicy)) {
+        if (
+          withoutPolicy
+          && withoutPolicy.length > 3
+          && !isApproveActionLabel(withoutPolicy)
+        ) {
           return withoutPolicy.substring(0, 200);
         }
       }
@@ -1527,21 +1554,25 @@ export function extractionFunction(
       actions: CursorState['pendingApprovals'][0]['actions'],
     ): CursorState['pendingApprovals'][0] | null => {
       const cmdEl = card.querySelector('.ui-shell-tool-call__command');
-      const cmdText = (cmdEl?.textContent || '')
-        .trim()
-        .replace(/^\$\s*/, '')
-        .replace(/\s+/g, ' ')
-        .substring(0, 240);
+      const cmdText = sanitizeApprovalCommandText(
+        (cmdEl?.textContent || '')
+          .trim()
+          .replace(/^\$\s*/, '')
+          .replace(/\s+/g, ' ')
+          .substring(0, 240),
+      );
       const descEl = card.querySelector('.ui-shell-tool-call__description');
-      const descText = (descEl?.textContent || '').trim().substring(0, 200);
-      const title = readTitleFromCard(card, cmdText, descText);
+      const rawDesc = (descEl?.textContent || '').trim().substring(0, 200);
+      const descText = isApproveActionLabel(rawDesc) ? '' : rawDesc;
+      const rawTitle = readTitleFromCard(card, cmdText, descText);
+      const title = isApproveActionLabel(rawTitle) ? '' : rawTitle;
       const reason = readReasonFromCard(card);
       const mode = readPolicyFromCard(card);
       const composerId =
         card.closest('[data-composer-id]')?.getAttribute('data-composer-id')
         || containerComposerId
         || '';
-      const description = title || cmdText || descText || 'Pending approval';
+      const description = title || cmdText || descText || 'Command pending approval';
       if (isBackgroundApprovalLabel(description)) return null;
       if (!actions.some((a) => a.type === 'approve')) return null;
 
@@ -1709,7 +1740,7 @@ export function extractionFunction(
           for (const btn of bucket.approve) {
             actions.push({
               label: btn.label,
-              type: btn.label.toLowerCase().includes('all') ? 'approve_all' : 'approve',
+              type: isApproveAllLabel(btn.label) ? 'approve_all' : 'approve',
               selectorPath: btn.selector,
             });
           }
@@ -1719,7 +1750,27 @@ export function extractionFunction(
           const row = card.querySelector('.ui-shell-tool-call__approval-row');
           const entry = buildApprovalFromCard(card, row, actions);
           if (!entry) continue;
-          if (!entry.command && !entry.title && /^run$/i.test(entry.description)) continue;
+          // Bare approve-label cards with no command/title are false positives
+          // (e.g. unrelated "Run" controls). Keep Allow/Accept when they still
+          // have real actions but never treat the label itself as the command.
+          if (
+            !entry.command
+            && !entry.title
+            && isApproveActionLabel(entry.description)
+          ) {
+            entry.description = 'Command pending approval';
+          }
+          if (
+            !entry.command
+            && !entry.title
+            && entry.description === 'Command pending approval'
+            && /^run$/i.test(
+              bucket.approve[0]?.label?.trim() || '',
+            )
+          ) {
+            // Empty "Run" without payload is almost always a non-approval control.
+            continue;
+          }
           seenCards.add(card);
           pendingApprovals.push(entry);
         }
@@ -1730,19 +1781,23 @@ export function extractionFunction(
         }
         for (const btn of approveButtons) {
           if (usedApprove.has(btn.el)) continue;
+          // Bare "Run" without a tool card is usually a false positive; other
+          // approve labels (Allow / Accept) may still be real approvals whose
+          // command text lives outside the legacy selectors.
           if (/^run$/i.test(btn.label.trim())) continue;
           const actions: CursorState['pendingApprovals'][0]['actions'] = [{
             label: btn.label,
-            type: btn.label.toLowerCase().includes('all') ? 'approve_all' : 'approve',
+            type: isApproveAllLabel(btn.label) ? 'approve_all' : 'approve',
             selectorPath: btn.selector,
           }];
           for (const rej of rejectButtons) {
             if (rej.el.closest('.ui-tool-call-card') || rej.el.closest('.ui-shell-tool-call')) continue;
             actions.push({ label: rej.label, type: 'reject', selectorPath: rej.selector });
           }
+          const labelIsApproveOnly = isApproveActionLabel(btn.label);
           pendingApprovals.push({
             id: `legacy:${btn.selector}`,
-            description: btn.label,
+            description: labelIsApproveOnly ? 'Command pending approval' : btn.label,
             composerId: containerComposerId || undefined,
             actions,
           });
@@ -2629,13 +2684,31 @@ export function extractionFunction(
     let modelName = '';
     let modelId = '';
     if (modelEl) {
+      // Cursor's model trigger may show an Effort badge ("High") as the first
+      // span — skip effort/options tokens and prefer a longer model label.
+      const effortBadgeRe = /^(low|medium|high|fast)$/i;
       const spans = modelEl.querySelectorAll('span');
+      const candidates: string[] = [];
       for (const s of Array.from(spans)) {
-        const t = (s.textContent || '').trim();
-        if (t && !t.includes('chevron') && t.length > 1) {
-          modelName = t;
-          break;
-        }
+        const t = (s.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!t || t.includes('chevron') || t.length <= 1) continue;
+        if (effortBadgeRe.test(t)) continue;
+        candidates.push(t);
+      }
+      // Prefer the longest non-effort span (model names are usually longer).
+      if (candidates.length > 0) {
+        modelName = candidates.reduce((best, cur) =>
+          cur.length > best.length ? cur : best
+        );
+      }
+      if (!modelName) {
+        const aria = (modelEl.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+        const ariaModel = aria.replace(/^(model|current model)\s*[:\-]?\s*/i, '').trim();
+        if (ariaModel && !effortBadgeRe.test(ariaModel)) modelName = ariaModel;
+      }
+      if (!modelName) {
+        const title = (modelEl.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+        if (title && !effortBadgeRe.test(title)) modelName = title;
       }
       modelId = modelEl.getAttribute('id') || '';
     }

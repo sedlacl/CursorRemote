@@ -1,5 +1,41 @@
 import type { Approval } from './types.js';
 
+/**
+ * Approve-button labels from config (`approveButton.textMatch`). These must never
+ * be treated as shell command / approval title text when the real command is missing.
+ */
+export const APPROVE_ACTION_LABELS = [
+  'Accept',
+  'Approve',
+  'Run',
+  'Allow',
+  'Accept All',
+] as const;
+
+/** True when `label` is exactly an approve action label (e.g. Allow / Run). */
+export function isApproveActionLabel(label: string): boolean {
+  const norm = label.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!norm) return false;
+  return APPROVE_ACTION_LABELS.some((item) => item.toLowerCase() === norm);
+}
+
+/**
+ * True for multi-approve actions like "Accept All" / "Approve All".
+ * Must not match bare "Allow" (which contains the letters "all").
+ */
+export function isApproveAllLabel(label: string): boolean {
+  const norm = label.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!norm) return false;
+  return /\b(accept|approve|allow)\s+all\b/.test(norm) || /^all$/i.test(norm);
+}
+
+/** Strip approve-button labels that leaked into command/title fields. */
+export function sanitizeApprovalCommandText(text: string | undefined | null): string {
+  const trimmed = (text || '').replace(/\s+/g, ' ').trim();
+  if (!trimmed || isApproveActionLabel(trimmed)) return '';
+  return trimmed;
+}
+
 /** Shell/Task cards with "Run in background" are not blocking approvals. */
 export function isBackgroundApprovalLabel(label: string): boolean {
   const norm = label.replace(/\s+/g, ' ').trim().toLowerCase();

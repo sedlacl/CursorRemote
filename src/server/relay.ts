@@ -36,6 +36,7 @@ import {
   type WebDomSnapshot,
   type WebDomUnavailable,
 } from './diagnostic-snapshot.js';
+import { UiReportError, UiReportService } from './ui-report.js';
 import { diagnosticIdsMatch } from '../shared/diagnostic-id.js';
 import {
   resolveSubagentAction,
@@ -186,6 +187,7 @@ export class Relay {
   private readonly clientDir: string;
   private readonly domExportService: DomExportService;
   private readonly diagnosticSnapshotService: DiagnosticSnapshotService;
+  private readonly uiReportService: UiReportService;
 
   private sessionStore: WebappSessionStore;
   private loginAttempts = new Map<string, RateLimitEntry>();
@@ -235,6 +237,10 @@ export class Relay {
         collectWebDom: (timeoutMs) => this.collectWebDomFromClients(timeoutMs),
       },
     );
+    this.uiReportService = new UiReportService(this.diagnosticSnapshotService, {
+      packageRoot: resolvePackageRoot(),
+      diagnosticId: SERVER_INSTANCE.diagnosticId,
+    });
     this.storageHistory = new CursorStorageHistory(config.cursorStateDbPath);
     this.sessionStore = createWebappSessionStore(config.dataDir);
     const resolvedClient = resolveClientDir(getServerModuleDir());
@@ -424,7 +430,9 @@ export class Relay {
     const clientDir = this.clientDir;
     const isSourceClient = this.clientBuild === 'vite-dev';
 
-    this.app.use(express.json());
+    // UI report posts full web-client DOM; default 100kb is too small.
+    // UI report may include web DOM (~2 MiB) + PNG base64 screenshot.
+    this.app.use(express.json({ limit: '6mb' }));
 
     this.app.post(GIT_SNAPSHOT_PUSH_PATH, (req, res) => {
       if (!this.isLocalRequest(req)) {
@@ -698,6 +706,63 @@ export class Relay {
           return;
         }
         res.status(503).json({ error: 'snapshot_unavailable' });
+      }
+    });
+
+    this.app.post('/debug/ui-report', async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      if (!this.resolveDebugAuth(req)) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+
+      const body = (req.body ?? {}) as {
+        diagnosticId?: unknown;
+        webDomHtml?: unknown;
+        clientUrl?: unknown;
+        userAgent?: unknown;
+        viewport?: unknown;
+        note?: unknown;
+        webScreenshotPngBase64?: unknown;
+      };
+
+      const webDomHtml = typeof body.webDomHtml === 'string' ? body.webDomHtml : '';
+      const viewportRaw = body.viewport && typeof body.viewport === 'object'
+        ? body.viewport as { width?: unknown; height?: unknown }
+        : null;
+      const viewport =
+        viewportRaw
+        && typeof viewportRaw.width === 'number'
+        && typeof viewportRaw.height === 'number'
+          ? { width: viewportRaw.width, height: viewportRaw.height }
+          : undefined;
+
+      try {
+        const result = await this.uiReportService.capture({
+          diagnosticId: typeof body.diagnosticId === 'string' ? body.diagnosticId : '',
+          webDomHtml,
+          clientUrl: typeof body.clientUrl === 'string' ? body.clientUrl : undefined,
+          userAgent: typeof body.userAgent === 'string' ? body.userAgent : undefined,
+          viewport,
+          note: typeof body.note === 'string' ? body.note : undefined,
+          webScreenshotPngBase64:
+            typeof body.webScreenshotPngBase64 === 'string'
+              ? body.webScreenshotPngBase64
+              : undefined,
+        });
+        console.log(
+          `[ui-report] issue=${result.issueId} path=${result.issuePath}`
+          + (result.warnings.length ? ` warnings=${result.warnings.join(',')}` : ''),
+        );
+        res.json(result);
+      } catch (error) {
+        if (error instanceof UiReportError) {
+          res.status(error.status).json({ error: error.code });
+          return;
+        }
+        res.status(503).json({ error: 'ui_report_unavailable' });
       }
     });
 

@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   isActionableApproval,
+  isApproveActionLabel,
+  isApproveAllLabel,
   isBackgroundApprovalLabel,
   isGarbageActionLabel,
   looksLikeButtonLabel,
+  sanitizeApprovalCommandText,
 } from '../src/server/approval-filter.js';
 
 describe('isBackgroundApprovalLabel', () => {
@@ -44,6 +47,22 @@ describe('isGarbageActionLabel', () => {
   it('allows normal skip labels', () => {
     assert.equal(isGarbageActionLabel('Skip'), false);
     assert.equal(isGarbageActionLabel('Reject'), false);
+  });
+});
+
+describe('isApproveActionLabel / sanitizeApprovalCommandText', () => {
+  it('treats Allow/Run/Accept as approve labels, never as command text', () => {
+    assert.equal(isApproveActionLabel('Allow'), true);
+    assert.equal(isApproveActionLabel('Run'), true);
+    assert.equal(isApproveActionLabel('Accept'), true);
+    assert.equal(isApproveActionLabel('Accept All'), true);
+    assert.equal(isApproveActionLabel('npm test'), false);
+    assert.equal(sanitizeApprovalCommandText('Allow'), '');
+    assert.equal(sanitizeApprovalCommandText('  Run  '), '');
+    assert.equal(sanitizeApprovalCommandText('taskkill /PID 1'), 'taskkill /PID 1');
+    assert.equal(isApproveAllLabel('Allow'), false);
+    assert.equal(isApproveAllLabel('Accept All'), true);
+    assert.equal(isApproveAllLabel('Approve All'), true);
   });
 });
 

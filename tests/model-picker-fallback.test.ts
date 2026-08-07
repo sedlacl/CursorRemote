@@ -154,13 +154,23 @@ describe('MODEL_ITEM_COLLECTOR_JS', () => {
     contains(other: El): boolean;
     remove(): void;
     click(): void;
+    getBoundingClientRect(): { width: number; height: number };
     get textContent(): string;
     get className(): string;
+    get parentElement(): El | null;
   };
   const matches = (el: El, sel: string): boolean => {
     if (sel === 'button') return el.tagName === 'BUTTON';
     if (sel === '[id]') return !!el.id;
     if (sel === '[data-testid]') return el.attrs['data-testid'] !== undefined;
+    // Compound attribute selectors: [role="menu"][data-state="open"]
+    if (sel.includes('[') && sel.indexOf('[') !== sel.lastIndexOf('[')) {
+      const parts = sel.match(/\[[^\]]+\]/g) || [];
+      return parts.every((part) => matches(el, part));
+    }
+    if (sel.endsWith(':not([hidden])')) {
+      return matches(el, sel.replace(/:not\(\[hidden\]\)$/, '')) && !el.attrs.hidden;
+    }
     const m = sel.match(/^\[([a-z-]+)="([^"]+)"\]$/);
     if (m) return el.attrs[m[1]] === m[2];
     const m2 = sel.match(/^\[role="([^"]+)"\]$/);
@@ -213,11 +223,13 @@ describe('MODEL_ITEM_COLLECTOR_JS', () => {
         this.parent = null;
       },
       click() { clicks.count++; },
+      getBoundingClientRect() { return { width: 200, height: 100 }; },
       get textContent() {
         if (this.attrs.__text) return this.attrs.__text;
         return this.children.map(c => c.textContent).join('');
       },
       get className() { return this.attrs.class ?? ''; },
+      get parentElement() { return this.parent; },
     };
     if (opts.text) el.attrs.__text = opts.text;
     for (const ch of opts.children ?? []) {
@@ -235,11 +247,27 @@ describe('MODEL_ITEM_COLLECTOR_JS', () => {
   const setupSandbox = (html: string) => {
     const root = parseHtml(html, makeEl);
     const allEls = collectAll(root);
+    const queryAll = (sel: string): El[] => {
+      const parts = sel.split(',').map((s) => s.trim()).filter(Boolean);
+      const out: El[] = [];
+      const seen = new Set<El>();
+      for (const part of parts) {
+        if (matches(root, part) && !seen.has(root)) {
+          seen.add(root);
+          out.push(root);
+        }
+        for (const el of matchInTree(root, part)) {
+          if (!seen.has(el)) {
+            seen.add(el);
+            out.push(el);
+          }
+        }
+      }
+      return out;
+    };
     const fakeDoc = {
-      querySelector: (sel: string) => {
-        const found = matchInTree(root, sel);
-        return found[0] ?? (sel === '[role="menu"]' && root.attrs.role === 'menu' ? root : null);
-      },
+      querySelector: (sel: string) => queryAll(sel)[0] ?? null,
+      querySelectorAll: (sel: string) => queryAll(sel),
       getElementById: (id: string) => allEls.find(e => e.id === id) ?? null,
     };
     return { root, fakeDoc, allEls };
@@ -365,6 +393,71 @@ describe('MODEL_ITEM_COLLECTOR_JS', () => {
     }
     // Sanity: an unknown id should NOT resolve.
     assert.equal(runPick(fixtureHtml, 'label::Not A Model'), false);
+  });
+
+  // Cursor builds with Effort / Options / Model submenu — collector must ignore
+  // settings rows and read models from the Model submenu after it is opened.
+  it('ignores Effort/Options and collects models from the Model submenu', () => {
+    const fixtureHtml = `
+      <div role="menu" class="ui-model-picker__menu">
+        <div id="base-ui-_r_arg_" class="ui-menu__section">
+          <div class="ui-menu__section-title">Effort</div>
+          <div role="menuitem"><span>Low</span></div>
+          <div role="menuitem"><span>Medium</span></div>
+          <div role="menuitem"><span>High</span></div>
+        </div>
+        <div class="ui-menu__section">
+          <div class="ui-menu__section-title">Options</div>
+          <div id="base-ui-_r_arl_" role="menuitemcheckbox" class="ui-menu__toggle-row"><span>Fast</span></div>
+        </div>
+        <div class="ui-menu__section">
+          <div class="ui-menu__section-title">Model</div>
+          <div role="menuitem" class="ui-menu__submenu-trigger" aria-haspopup="menu" aria-controls="model-submenu">
+            <span>Cursor Grok 4.5</span>
+          </div>
+        </div>
+        <div id="model-submenu" role="menu" data-state="open">
+          <div role="menuitem"><span>GPT-5.5</span><button id="_r_aa_">Edit</button></div>
+          <div role="menuitem"><span>Claude Opus 4.7</span><button id="_r_bb_">Edit</button></div>
+          <div role="menuitem"><span>Cursor Grok 4.5</span><button id="_r_cc_">Edit</button></div>
+        </div>
+      </div>
+    `;
+    const { fakeDoc } = setupSandbox(fixtureHtml);
+    const code = `
+      ${MODEL_ITEM_COLLECTOR_JS}
+      const root = document.querySelector('[role="menu"]');
+      const opened = openModelSubmenu(root);
+      const menu = findModelItemsMenu(root);
+      const items = collectModelItems(menu);
+      ({ opened, labels: items.map((i) => i.label), ids: items.map((i) => i.id) })
+    `;
+    const result = vm.runInNewContext(code, { document: fakeDoc, Array }) as {
+      opened: boolean;
+      labels: string[];
+      ids: string[];
+    };
+    const labels = JSON.parse(JSON.stringify(result.labels.slice().sort())) as string[];
+    assert.equal(result.opened, true);
+    assert.deepEqual(labels, ['Claude Opus 4.7', 'Cursor Grok 4.5', 'GPT-5.5']);
+    assert.ok(!labels.includes('Fast'));
+    assert.ok(!labels.includes('EffortLowMediumHigh'));
+    assert.ok(!labels.includes('High'));
+    // Round-trip: each collected id must resolve inside the submenu.
+    for (const id of result.ids) {
+      const pickCode = `
+        ${MODEL_ITEM_COLLECTOR_JS}
+        const root = document.querySelector('[role="menu"]');
+        openModelSubmenu(root);
+        pickModelById(findModelItemsMenu(root), ${JSON.stringify(id)});
+      `;
+      const { fakeDoc: pickDoc } = setupSandbox(fixtureHtml);
+      assert.equal(
+        vm.runInNewContext(pickCode, { document: pickDoc, Array }) as boolean,
+        true,
+        `pickModelById should resolve "${id}"`,
+      );
+    }
   });
 });
 

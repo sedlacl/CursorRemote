@@ -63,6 +63,25 @@ const REACT_USE_ID_RE = /^_r_[a-z0-9]+_$/;
 export const MODEL_ITEM_HELPERS_JS = `
   const REACT_USE_ID_RE = ${REACT_USE_ID_RE.toString()};
 
+  const parentOf = (el) => el && (el.parentElement || el.parent || null);
+
+  const hasClass = (el, name) => {
+    if (!el) return false;
+    if (el.classList && typeof el.classList.contains === 'function') {
+      return el.classList.contains(name);
+    }
+    return String(el.className || '').split(/\\s+/).includes(name);
+  };
+
+  const closestWithClass = (el, name) => {
+    let cur = el;
+    while (cur) {
+      if (hasClass(cur, name)) return cur;
+      cur = parentOf(cur);
+    }
+    return null;
+  };
+
   // Row label, excluding text from descendant <button> elements (each row has
   // an inner "Edit" button whose text would otherwise pollute the label).
   const labelOf = (el) => {
@@ -75,20 +94,133 @@ export const MODEL_ITEM_HELPERS_JS = `
   const stableIdOf = (el) => {
     const raw = el.id || '';
     if (!raw || REACT_USE_ID_RE.test(raw)) return '';
+    // base-ui / radix generated ids are also unstable across opens.
+    if (/^base-ui-/i.test(raw)) return '';
     return raw;
   };
 
-  // Top-level rows under the menu — drops items contained inside another
-  // candidate so per-row Edit buttons don't show up as separate "models."
+  const sectionTitleOf = (section) => {
+    if (!section) return '';
+    const titleEl = section.querySelector('.ui-menu__section-title');
+    return (titleEl && titleEl.textContent || '').replace(/\\s+/g, ' ').trim();
+  };
+
+  const isInNamedSection = (el, sectionName) => {
+    const section = closestWithClass(el, 'ui-menu__section');
+    if (!section) return false;
+    return new RegExp('^' + sectionName + '$', 'i').test(sectionTitleOf(section));
+  };
+
+  const isNonModelRow = (el) => {
+    if (!el) return true;
+    if (hasClass(el, 'ui-menu__section') || hasClass(el, 'ui-menu__section-title')) return true;
+    if (hasClass(el, 'ui-menu__toggle-row')) return true;
+    if ((el.getAttribute && el.getAttribute('role')) === 'menuitemcheckbox') return true;
+    if (hasClass(el, 'ui-menu__submenu-trigger')) return true;
+    if (isInNamedSection(el, 'Effort')) return true;
+    if (isInNamedSection(el, 'Options')) return true;
+    const label = labelOf(el);
+    if (!label) return true;
+    if (/^(low|medium|high|fast|effort|options|model)$/i.test(label)) return true;
+    // Concatenated Effort section container label seen in live probes.
+    if (/^effort(low)?(medium)?(high)?$/i.test(label.replace(/\\s+/g, ''))) return true;
+    return false;
+  };
+
+  // Top-level model rows under the (sub)menu. Prefers real menuitem rows and
+  // drops Effort / Options / section chrome. Nested Edit buttons are excluded
+  // by the contains() filter (same as before).
   const modelRowsIn = (menu) => {
     if (!menu) return [];
-    const raw = Array.from(menu.querySelectorAll('[id], [role="menuitem"], button, [data-testid]'));
-    return raw.filter(item => !raw.some(other => other !== item && other.contains(item)));
+    const isRowRole = (el) => {
+      const role = el.getAttribute && el.getAttribute('role');
+      return role === 'menuitem' || role === 'menuitemradio';
+    };
+    const raw = Array.from(menu.querySelectorAll(
+      '[role="menuitem"], [role="menuitemradio"], [id], button, [data-testid]'
+    ));
+    return raw.filter((item) => {
+      if (isNonModelRow(item)) return false;
+      // Drop nested candidates (per-row Edit buttons, etc.).
+      if (raw.some((other) => other !== item && other.contains(item))) return false;
+      // Drop non-row containers that only wrap other candidates (section shells
+      // with an id). Keep real menuitem rows even when they wrap an inner [id].
+      if (
+        !isRowRole(item)
+        && raw.some((other) => other !== item && item.contains(other))
+      ) {
+        return false;
+      }
+      return true;
+    });
   };
 
   const clickModelRow = (item) => {
     const clickable = item.querySelector('.composer-unified-context-menu-item') || item;
     clickable.click();
+  };
+
+  // Model catalog lives in a submenu on current Cursor builds
+  // (Effort / Options / Model sections). Flat menus have no submenu trigger.
+  const findModelSubmenuTrigger = (menu) => {
+    if (!menu) return null;
+    const sections = Array.from(menu.querySelectorAll('.ui-menu__section'));
+    for (const sec of sections) {
+      if (!/^model$/i.test(sectionTitleOf(sec))) continue;
+      const trigger = sec.querySelector('.ui-menu__submenu-trigger, [aria-haspopup="menu"]');
+      if (trigger) return trigger;
+    }
+    return menu.querySelector('.ui-menu__submenu-trigger');
+  };
+
+  const openModelSubmenu = (menu) => {
+    const trigger = findModelSubmenuTrigger(menu);
+    if (!trigger) return false;
+    if (trigger.getAttribute && trigger.getAttribute('aria-expanded') === 'true') return true;
+    (trigger.querySelector('.composer-unified-context-menu-item') || trigger).click();
+    return true;
+  };
+
+  const menuLooksLikeModelCatalog = (m) => {
+    if (!m) return false;
+    const titles = Array.from(m.querySelectorAll('.ui-menu__section-title')).map((el) =>
+      (el.textContent || '').replace(/\\s+/g, ' ').trim()
+    );
+    if (titles.some((t) => /^effort$/i.test(t))) return false;
+    const rows = modelRowsIn(m);
+    return rows.length > 0;
+  };
+
+  // After opening the Model submenu, prefer that menu; otherwise keep the root
+  // (flat-menu back-compat).
+  const findModelItemsMenu = (rootMenu) => {
+    if (!rootMenu) return null;
+    const trigger = findModelSubmenuTrigger(rootMenu);
+    if (!trigger) return rootMenu;
+    const controls = trigger.getAttribute && trigger.getAttribute('aria-controls');
+    if (controls) {
+      const byId = document.getElementById(controls);
+      if (byId && menuLooksLikeModelCatalog(byId)) return byId;
+      if (byId) return byId;
+    }
+    const nested = rootMenu.querySelector('[role="menu"][data-state="open"]')
+      || rootMenu.querySelector('[role="menu"]');
+    if (nested && nested !== rootMenu) return nested;
+    const openMenus = Array.from(document.querySelectorAll(
+      '[role="menu"][data-state="open"], [role="menu"]:not([hidden])'
+    ));
+    for (const m of openMenus) {
+      if (m === rootMenu) continue;
+      try {
+        const rect = m.getBoundingClientRect ? m.getBoundingClientRect() : { width: 1, height: 1 };
+        if ((rect.width || 0) <= 0 || (rect.height || 0) <= 0) continue;
+      } catch (_) { /* ignore */ }
+      if (menuLooksLikeModelCatalog(m)) return m;
+    }
+    for (const m of openMenus) {
+      if (m !== rootMenu) return m;
+    }
+    return rootMenu;
   };
 
   const collectModelItems = (menu) => {
@@ -973,21 +1105,33 @@ export class CommandExecutor {
       `) as boolean;
       if (!menuVisible) throw new Error('Model picker did not open');
 
-      // Step 3: Find and click the model item via the shared helper so
+      // Step 3: On current Cursor builds the catalog lives under a Model
+      // submenu (Effort / Options sit at the top level). Flat menus no-op.
+      const openedSubmenu = await client.evaluate(`
+        (() => {
+          ${MODEL_MENU_LOOKUP_JS}
+          ${MODEL_ITEM_HELPERS_JS}
+          return openModelSubmenu(findModelMenu());
+        })()
+      `) as boolean;
+      if (openedSubmenu) await sleep(300);
+
+      // Step 4: Find and click the model item via the shared helper so
       // setModel, setPlanModel, web client, and Telegram all resolve the
       // same way.
       const selected = await client.evaluate(`
         (() => {
           ${MODEL_MENU_LOOKUP_JS}
           ${MODEL_ITEM_HELPERS_JS}
-          return pickModelById(findModelMenu(), ${JSON.stringify(modelId)});
+          const root = findModelMenu();
+          return pickModelById(findModelItemsMenu(root), ${JSON.stringify(modelId)});
         })()
       `) as boolean;
       if (!selected) throw new Error(`Model "${modelId}" not found in dropdown`);
 
       await sleep(200);
 
-      // Step 4: Verify dropdown closed (confirms selection was accepted)
+      // Step 5: Verify dropdown closed (confirms selection was accepted)
       const menuStillOpen = await client.evaluate(`
         (() => {
           ${MODEL_MENU_LOOKUP_JS}
@@ -998,6 +1142,10 @@ export class CommandExecutor {
         console.warn(`[command-executor] Model dropdown still open — pressing Escape`);
         await client.pressKey('Escape', 'Escape', 27);
         await sleep(100);
+        if (openedSubmenu) {
+          await client.pressKey('Escape', 'Escape', 27);
+          await sleep(100);
+        }
       }
 
       console.log(`[command-executor] Model set to: ${modelId} (menu closed: ${!menuStillOpen})`);
@@ -1023,11 +1171,20 @@ export class CommandExecutor {
   async setPlanModel(commandId: string, selectorPath: string, planModelId: string): Promise<CommandResult> {
     return this.withRetry(commandId, async (client) => {
       await this.openPlanModelMenu(client, selectorPath);
+      const openedSubmenu = await client.evaluate(`
+        (() => {
+          ${MODEL_MENU_LOOKUP_JS}
+          ${MODEL_ITEM_HELPERS_JS}
+          return openModelSubmenu(findModelMenu());
+        })()
+      `) as boolean;
+      if (openedSubmenu) await sleep(300);
       const selected = await client.evaluate(`
         (() => {
           ${MODEL_MENU_LOOKUP_JS}
           ${MODEL_ITEM_HELPERS_JS}
-          return pickModelById(findModelMenu(), ${JSON.stringify(planModelId)});
+          const root = findModelMenu();
+          return pickModelById(findModelItemsMenu(root), ${JSON.stringify(planModelId)});
         })()
       `) as boolean;
       if (!selected) throw new Error(`Plan model "${planModelId}" not found`);
@@ -1042,6 +1199,10 @@ export class CommandExecutor {
       if (menuStillOpen) {
         await client.pressKey('Escape', 'Escape', 27);
         await sleep(100);
+        if (openedSubmenu) {
+          await client.pressKey('Escape', 'Escape', 27);
+          await sleep(100);
+        }
       }
       console.log(`[command-executor] Plan model set to: ${planModelId}`);
     });
@@ -1130,16 +1291,30 @@ export class CommandExecutor {
   ): Promise<{ options: PlanModelOption[] }> {
     await this.openPlanModelMenu(client, selectorPath);
 
+    const openedSubmenu = await client.evaluate(`
+      (() => {
+        ${MODEL_MENU_LOOKUP_JS}
+        ${MODEL_ITEM_HELPERS_JS}
+        return openModelSubmenu(findModelMenu());
+      })()
+    `) as boolean;
+    if (openedSubmenu) await sleep(300);
+
     const options = await client.evaluate(`
       (() => {
         ${MODEL_MENU_LOOKUP_JS}
         ${MODEL_ITEM_HELPERS_JS}
-        return collectModelItems(findModelMenu());
+        const root = findModelMenu();
+        return collectModelItems(findModelItemsMenu(root));
       })()
     `) as PlanModelOption[];
 
     await client.pressKey('Escape', 'Escape', 27);
     await sleep(100);
+    if (openedSubmenu) {
+      await client.pressKey('Escape', 'Escape', 27);
+      await sleep(100);
+    }
     return { options };
   }
 
@@ -1178,16 +1353,30 @@ export class CommandExecutor {
     `) as boolean;
     if (!menuVisible) throw new Error('Model picker did not open');
 
+    const openedSubmenu = await client.evaluate(`
+      (() => {
+        ${MODEL_MENU_LOOKUP_JS}
+        ${MODEL_ITEM_HELPERS_JS}
+        return openModelSubmenu(findModelMenu());
+      })()
+    `) as boolean;
+    if (openedSubmenu) await sleep(300);
+
     const options = await client.evaluate(`
       (() => {
         ${MODEL_MENU_LOOKUP_JS}
         ${MODEL_ITEM_HELPERS_JS}
-        return collectModelItems(findModelMenu());
+        const root = findModelMenu();
+        return collectModelItems(findModelItemsMenu(root));
       })()
     `) as PlanModelOption[];
 
     await client.pressKey('Escape', 'Escape', 27);
     await sleep(100);
+    if (openedSubmenu) {
+      await client.pressKey('Escape', 'Escape', 27);
+      await sleep(100);
+    }
     return { options };
   }
 

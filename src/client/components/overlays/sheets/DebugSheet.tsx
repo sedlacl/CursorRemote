@@ -3,7 +3,11 @@ import type { CursorState } from '../../../../server/types.js';
 import { useCommandClient } from '../../../state/commandClient.js';
 import { downloadDomExport, type DomExportScope } from '../../../state/domExport.js';
 import { fetchDebugInfo, type HealthSnapshot } from '../../../state/serverHealth.js';
+import { captureUiReport } from '../../../state/uiReport.js';
 import { useUiState } from '../../../state/uiState.js';
+import { copyToClipboard } from '../../../utils/clipboard.js';
+import { promptReportNote } from '../../../utils/reportNoteDialog.js';
+import { captureWebClientScreenshot, waitForNextPaint } from '../../../utils/webScreenshot.js';
 import { buildStopButtonState } from '../../../view-models/stopState.js';
 
 function formatAgentStopDebugLabel(state: CursorState): string {
@@ -42,6 +46,7 @@ export function DebugSheet({
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState<DomExportScope | null>(null);
   const [exportError, setExportError] = useState('');
+  const [reporting, setReporting] = useState(false);
 
   const loadDetails = useCallback(async () => {
     setLoading(true);
@@ -117,12 +122,17 @@ export function DebugSheet({
       health: serverHealth,
       stateGitStatus: state.gitStatus,
     };
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    const result = await copyToClipboard(JSON.stringify(payload, null, 2));
+    if (result.ok) {
       ui.showToast('Debug JSON copied', 'success');
-    } catch {
-      ui.showToast('Copy failed', 'error');
+      return;
     }
+    ui.showToast(
+      result.shownManualFallback
+        ? 'Copy failed — select text manually'
+        : 'Copy failed',
+      'error',
+    );
   }, [details, serverHealth, socketConnected, state.gitStatus, ui]);
 
   const killServer = useCallback(async () => {
@@ -159,6 +169,47 @@ export function DebugSheet({
     }
   }, [state.activeComposerId, state.activeWindowId, ui]);
 
+  const reportUi = useCallback(async () => {
+    const server = (details?.server ?? serverHealth?.server) as Record<string, unknown> | undefined;
+    const diagnosticId = typeof server?.diagnosticId === 'string' ? server.diagnosticId : undefined;
+    setReporting(true);
+    setExportError('');
+    // Hide Debug sheet so it is not in the web-client screenshot.
+    ui.closeSheet();
+    try {
+      await waitForNextPaint();
+      let webScreenshotPngBase64: string | null = null;
+      let screenshotWarning = '';
+      try {
+        webScreenshotPngBase64 = await captureWebClientScreenshot();
+      } catch (err) {
+        screenshotWarning = err instanceof Error ? err.message : String(err);
+      }
+
+      const noteResult = await promptReportNote();
+      if (!noteResult.ok) {
+        return;
+      }
+
+      const result = await captureUiReport({
+        diagnosticId,
+        note: noteResult.note,
+        webScreenshotPngBase64,
+      });
+      const warnSuffix = result.warnings.length > 0 ? ` (${result.warnings.length} warnings)` : '';
+      ui.showToast(`Report saved: ${result.issuePath}${warnSuffix}`, 'success');
+      if (screenshotWarning) {
+        ui.showToast(`Web screenshot unavailable: ${screenshotWarning}`, 'error');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setExportError(message);
+      ui.showToast(message, 'error');
+    } finally {
+      setReporting(false);
+    }
+  }, [details, serverHealth, ui]);
+
   return (
     <div id="sheet-debug" className={`bottom-sheet debug-sheet ${visible ? '' : 'hidden'}`}>
       <div className="sheet-header debug-sheet-header">
@@ -180,13 +231,23 @@ export function DebugSheet({
         <div className="debug-export-warning">
           Raw diagnostic HTML and snapshot API responses are not sanitized and may contain sensitive chats, code, terminals, paths, or secrets.
           Use <code>/debug/snapshot?id=&lt;Diagnostic ID&gt;</code> with session or <code>DIAGNOSTIC_TOKEN</code> Bearer auth.
+          <strong> Report</strong> hides this sheet, captures a web-client screenshot, asks for a short description, then sends DOM + note to the server (Cursor DOM/screenshot/state) and writes an issue under <code>docs/issues/</code>.
         </div>
         <div className="debug-export-actions">
+          <button
+            id="debug-ui-report"
+            type="button"
+            className="debug-action-btn debug-report-btn"
+            disabled={reporting || exporting !== null}
+            onClick={() => void reportUi()}
+          >
+            {reporting ? 'Reporting…' : 'Report'}
+          </button>
           <button
             id="debug-export-chat"
             type="button"
             className="debug-action-btn"
-            disabled={exporting !== null || !socketConnected || !state.activeComposerId}
+            disabled={reporting || exporting !== null || !socketConnected || !state.activeComposerId}
             onClick={() => void exportDom('chat')}
           >
             {exporting === 'chat' ? 'Exporting chat…' : 'Export chat DOM'}
@@ -195,7 +256,7 @@ export function DebugSheet({
             id="debug-export-document"
             type="button"
             className="debug-action-btn debug-export-danger"
-            disabled={exporting !== null || !socketConnected || !state.activeWindowId}
+            disabled={reporting || exporting !== null || !socketConnected || !state.activeWindowId}
             onClick={() => void exportDom('document')}
           >
             {exporting === 'document' ? 'Exporting window…' : 'Export full window DOM'}
