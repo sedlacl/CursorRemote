@@ -12,6 +12,10 @@ import {
 } from './approval-registry.js';
 import { mergeMessages } from './message-history.js';
 import { getHistoryScopeKey } from '../shared/history-scope.js';
+import {
+  resolveComposerCacheKey,
+  restoreCachedMessagesIfUnhydrated,
+} from './transcript-hydration.js';
 import { ConversationRelationRegistry } from './conversation-relation-registry.js';
 import { buildActiveConversationContext } from './conversation-context.js';
 
@@ -115,6 +119,7 @@ export class StateManager extends EventEmitter {
   private backgroundTasksLastSeenAt = 0;
   private historyScope = '';
   private messageHistory: ChatElement[] = [];
+  private composerMessageCache = new Map<string, ChatElement[]>();
   private gitWindowSnapshots = new Map<string, GitWindowSnapshot>();
   private activeGitWindowKey: string | null = null;
   private lastGitPushAt: number | null = null;
@@ -195,6 +200,10 @@ export class StateManager extends EventEmitter {
 
     this.messageHistory = merged;
     this.currentState = { ...this.currentState, messages: merged };
+    const cacheKey = resolveComposerCacheKey(this.currentState);
+    if (cacheKey && merged.length > 0) {
+      this.composerMessageCache.set(cacheKey, merged.slice());
+    }
     this.emit('state:patch', { messages: merged });
     return { addedCount, totalCount: merged.length };
   }
@@ -265,6 +274,19 @@ export class StateManager extends EventEmitter {
       this.messageHistory = mergeMessages(this.messageHistory, newState.messages);
     }
     newState.messages = this.messageHistory;
+    const cacheKey = resolveComposerCacheKey(newState);
+    if (cacheKey && newState.messages.length > 0) {
+      this.composerMessageCache.set(cacheKey, newState.messages.slice());
+    } else if (cacheKey) {
+      const held = restoreCachedMessagesIfUnhydrated(
+        newState.messages,
+        this.composerMessageCache.get(cacheKey),
+      );
+      if (held.length > 0) {
+        newState.messages = held;
+        this.messageHistory = held;
+      }
+    }
     newState.globalApprovalNotifications = this.currentState.globalApprovalNotifications ?? [];
 
     const stateForApply = this.applyBackgroundTaskStaleness(

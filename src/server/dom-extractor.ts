@@ -10,6 +10,13 @@ import type {
   SelectorConfig,
 } from './types.js';
 import { applyDerivedActivityToState } from './activity-derive.js';
+import {
+  EMPTY_TRANSCRIPT_NUDGE_COOLDOWN_MS,
+  EMPTY_TRANSCRIPT_RETRY_MS,
+  looksLikeUnhydratedTranscript,
+  nudgeUnhydratedTranscript,
+  resolveComposerCacheKey,
+} from './transcript-hydration.js';
 
 const EVALUATE_TIMEOUT_MS = 5000;
 const MAX_POLL_BACKOFF_MS = 5000;
@@ -206,6 +213,10 @@ export function extractionFunction(
     const container = findFirst(containerSelectors);
     if (!container) return null;
 
+    const reactTranscriptRoot =
+      container.querySelector('.composer-react-transcript-root[data-react-transcript-root]')
+      || container.querySelector('.composer-react-transcript-root');
+    const transcriptRootEmpty = !!reactTranscriptRoot && reactTranscriptRoot.childElementCount === 0;
     const messageWrappers = discoverMessageWrappers(container);
     let containerComposerId =
       container.getAttribute('data-composer-id') ||
@@ -2804,6 +2815,8 @@ export function extractionFunction(
       statusEl: statusEl ? { text: (statusEl.textContent || '').trim(), classes: statusEl.className } : undefined,
       elements: _rawElements,
       orphanIndicators: _orphanIndicators,
+      transcriptRootEmpty,
+      composerStatus,
     };
 
     const queueItems: CursorState['composerQueue']['items'] = [];
@@ -3004,6 +3017,8 @@ export class DOMExtractor {
   private pollInFlight = false;
   private failureStreak = 0;
   private running = false;
+  private lastTranscriptNudgeAt = 0;
+  private lastTranscriptNudgeComposerId = '';
 
   constructor(
     selectors: SelectorConfig,
@@ -3055,6 +3070,58 @@ export class DOMExtractor {
     }, delayMs);
   }
 
+  private extractArgs(): unknown[] {
+    return [
+      this.selectors.chatContainer.strategies,
+      this.selectors.approveButton.strategies,
+      this.selectors.approveButton.textMatch ?? [],
+      this.selectors.rejectButton.strategies,
+      this.selectors.rejectButton.textMatch ?? [],
+      this.selectors.chatInput.strategies,
+      this.selectors.agentStatus.strategies,
+      this.selectors.chatTabList?.strategies ?? [],
+      this.selectors.modeDropdown?.strategies ?? [],
+      this.selectors.modelDropdown?.strategies ?? [],
+      this.getWindowTitle(),
+    ];
+  }
+
+  private async extractOnce(): Promise<CursorState | null> {
+    if (!this.client) return null;
+    return await this.client.callFunctionWithTimeout(
+      extractionFunction as (...args: never[]) => unknown,
+      this.extractArgs(),
+      EVALUATE_TIMEOUT_MS,
+    ) as CursorState | null;
+  }
+
+  private async retryUnhydratedTranscript(state: CursorState): Promise<CursorState> {
+    if (!this.client || !this.client.isConnected()) return state;
+    const composerId = resolveComposerCacheKey(state);
+    const now = Date.now();
+    const canNudge =
+      composerId !== this.lastTranscriptNudgeComposerId
+      || now - this.lastTranscriptNudgeAt >= EMPTY_TRANSCRIPT_NUDGE_COOLDOWN_MS;
+    if (canNudge) {
+      try {
+        const nudged = await nudgeUnhydratedTranscript(this.client);
+        if (nudged) {
+          this.lastTranscriptNudgeAt = now;
+          this.lastTranscriptNudgeComposerId = composerId;
+          console.log(
+            `[dom-extractor] Empty transcript while composer looks unhydrated; nudging ${composerId || '(no composer id)'}`,
+          );
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[dom-extractor] Transcript nudge failed: ${message}`);
+      }
+    }
+    await sleep(EMPTY_TRANSCRIPT_RETRY_MS);
+    const retried = await this.extractOnce();
+    return retried ?? state;
+  }
+
   private handleFailure(message: string): void {
     const timedOut = message.includes('timeout');
     this.failureStreak++;
@@ -3086,23 +3153,10 @@ export class DOMExtractor {
     }
 
     try {
-      const state = await this.client.callFunctionWithTimeout(
-        extractionFunction as (...args: never[]) => unknown,
-        [
-          this.selectors.chatContainer.strategies,
-          this.selectors.approveButton.strategies,
-          this.selectors.approveButton.textMatch ?? [],
-          this.selectors.rejectButton.strategies,
-          this.selectors.rejectButton.textMatch ?? [],
-          this.selectors.chatInput.strategies,
-          this.selectors.agentStatus.strategies,
-          this.selectors.chatTabList?.strategies ?? [],
-          this.selectors.modeDropdown?.strategies ?? [],
-          this.selectors.modelDropdown?.strategies ?? [],
-          this.getWindowTitle(),
-        ],
-        EVALUATE_TIMEOUT_MS
-      ) as CursorState | null;
+      let state = await this.extractOnce();
+      if (state && looksLikeUnhydratedTranscript(state)) {
+        state = await this.retryUnhydratedTranscript(state);
+      }
 
       const derivedState = state ? applyDerivedActivityToState(state) : null;
       this.failureStreak = 0;
@@ -3143,4 +3197,8 @@ export class DOMExtractor {
       this.scheduleNextPoll();
     }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

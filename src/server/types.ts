@@ -37,6 +37,13 @@ export interface RawSignals {
   elements: RawElement[];
   /** Activity-related elements NOT inside any discovered transcript wrapper. */
   orphanIndicators: Array<{ cls: string; text: string; parentCls: string }>;
+  /**
+   * True when `.composer-react-transcript-root` exists but has no children.
+   * Cursor hydrates virtualized rows asynchronously after a tab/composer switch.
+   */
+  transcriptRootEmpty?: boolean;
+  /** `data-composer-status` on the active composer bar, lowercased. */
+  composerStatus?: string;
 }
 
 export type ComposerQueueActionType = 'send' | 'remove' | 'edit';

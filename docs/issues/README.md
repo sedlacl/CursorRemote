@@ -30,6 +30,7 @@ Hotové issues se **mažou** po shipped fixu (viz `.cursor/rules/issue-workflow.
 
 Otevřené: žádné.
 
+Smazáno 2026-08-18 (opraveno v 0.3.11): `2026-08-18-ui-report-P25A5TE8.md` (+ `.artifacts/P25A5TE8/`; stejný bug `43ARKA9X`, `3CGQJ73B`) — prázdný chat než Cursor hydratuje transcript.
 Smazáno 2026-08-18 (opraveno v 0.3.11): `2026-08-18-ui-report-XEDREASB.md` (+ `.artifacts/XEDREASB/`) — storage type=1 subagent notifikace → thought (`transcript:notification:<id>`).
 Smazáno 2026-08-18 (CI-only): `2026-08-07-gha-node20-deprecation.md` — `actions/checkout@v7`, `actions/setup-node@v7`.
 Smazáno 2026-08-18 (opraveno v 0.3.11): `2026-08-18-plan-todo-expand-flicker.md` (+ dump `temp/diag-usy-aflex-initdatag01/`).
