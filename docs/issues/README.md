@@ -24,11 +24,16 @@ docs/issues/.artifacts/<issueId>/
 Tato složka je **gitignored**. Markdown issue zůstává tracked a odkazuje absolutními cestami
 na artefakty — neinlineuje raw HTML/PNG.
 
-## Stav (2026-08-06)
+## Stav (2026-08-18)
 
-Ověřeno proti kódu 2026-08-06. Hotové issues se mažou (fix zůstává v kódu).
+Ověřeno proti kódu / Release CI 2026-08-07. Hotové issues se mažou (fix zůstává v kódu).
 
-Žádné otevřené issues.
+Otevřené:
+
+- `2026-08-18-ui-report-XEDREASB.md` — po `load_history` se subagent completion notifikace z Cursor storage vykreslí jako bubliny You s raw XML.
+- `2026-08-07-gha-node20-deprecation.md` — warning Node 20 deprecation u `checkout@v4` / `setup-node@v4` v Release workflow (zatím neblokuje).
+
+Smazáno 2026-08-18 (opraveno v 0.3.11): `2026-08-18-plan-todo-expand-flicker.md` (+ dump `temp/diag-usy-aflex-initdatag01/`).
 
 Smazáno 2026-08-06 (opraveno v 0.3.7): `2026-08-06-approval-card-shows-allow-as-command`,
 `2026-08-06-model-sheet-shows-effort-settings`. Smazáno jako non-actionable (prázdný New Agent,

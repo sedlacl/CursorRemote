@@ -223,6 +223,58 @@ export function extractionFunction(
       textPreview: string; parsedAs: string;
     }> = [];
 
+    function getPlanTodoExpandAttempts(): Record<string, true> {
+      const root = document as Document & { __crPlanTodoExpandAttempted?: Record<string, true> };
+      let store = root.__crPlanTodoExpandAttempted;
+      if (!store) {
+        store = Object.create(null) as Record<string, true>;
+        root.__crPlanTodoExpandAttempted = store;
+      }
+      return store;
+    }
+
+    /** Live Cursor (2026-08 dump): aria-expanded on the summary button, plus .expanded on the list. */
+    function isPlanTodoSummaryExpanded(wrapper: Element): boolean {
+      const clickable = wrapper.querySelector('.todo-summary-content-clickable');
+      if (clickable && clickable.getAttribute('aria-expanded') === 'true') return true;
+      return !!wrapper.querySelector('.todo-summary-expanded-content.expanded');
+    }
+
+    /**
+     * Current Cursor renders plan todos as li.ui-todo-item (not .todo-summary-item).
+     * Probe: temp/diag-usy-aflex-initdatag01 — 0× .todo-summary-item, items in ul.ui-todo-list.
+     */
+    function collectPlanTodos(wrapper: Element): { text: string; status: 'pending' | 'completed' | 'in_progress' }[] {
+      const todos: { text: string; status: 'pending' | 'completed' | 'in_progress' }[] = [];
+      const expanded = wrapper.querySelector('.todo-summary-expanded-content') || wrapper;
+      let items = expanded.querySelectorAll('li.ui-todo-item');
+      let mode: 'current' | 'legacy' = 'current';
+      if (items.length === 0) {
+        items = wrapper.querySelectorAll('.todo-summary-item');
+        mode = 'legacy';
+      }
+      for (const item of Array.from(items)) {
+        const contentEl = mode === 'current'
+          ? item.querySelector('.ui-todo-item__content')
+          : item.querySelector('.todo-summary-item-content');
+        const text = (contentEl?.textContent || '').trim();
+        if (!text) continue;
+        const itemCls = item.className || '';
+        const contentCls = contentEl?.className || '';
+        let status: 'pending' | 'completed' | 'in_progress' = 'pending';
+        if (mode === 'current') {
+          if (itemCls.includes('completed') || contentCls.includes('completed')) status = 'completed';
+          else if (contentCls.includes('in-progress') || itemCls.includes('in-progress')) status = 'in_progress';
+        } else if (contentCls.includes('todo-completed')) {
+          status = 'completed';
+        } else if (contentCls.includes('todo-in-progress') || item.querySelector('.todo-summary-in-progress-circle')) {
+          status = 'in_progress';
+        }
+        todos.push({ text, status });
+      }
+      return todos;
+    }
+
     function detectIndicators(el: Element): string[] {
       const flags: string[] = [];
       if (el.querySelector('.loading-indicator-v3')) flags.push('loading-v3');
@@ -1246,23 +1298,18 @@ export function extractionFunction(
             }
           }
 
-          const todos: { text: string; status: 'pending' | 'completed' | 'in_progress' }[] = [];
-          const summaryItems = wrapper.querySelectorAll('.todo-summary-item');
-          for (const item of Array.from(summaryItems)) {
-            const contentEl = item.querySelector('.todo-summary-item-content');
-            const text = (contentEl?.textContent || '').trim();
-            if (!text) continue;
-            const contentCls = contentEl?.className || '';
-            let status: 'pending' | 'completed' | 'in_progress' = 'pending';
-            if (contentCls.includes('todo-completed')) { status = 'completed'; }
-            else if (contentCls.includes('todo-in-progress') || item.querySelector('.todo-summary-in-progress-circle')) { status = 'in_progress'; }
-            todos.push({ text, status });
-          }
+          const todos = collectPlanTodos(wrapper);
 
-          // Collapsed: items not rendered yet. Click to expand; they'll appear next poll cycle.
-          if (todos.length === 0 && todosTotal > 0) {
-            const clickable = wrapper.querySelector('.todo-summary-content-clickable') as HTMLElement | null;
-            if (clickable) clickable.click();
+          // Collapsed only: expand once per plan. Never toggle an already-expanded header
+          // (wrong item selectors used to make expanded plans look empty every poll).
+          if (todos.length === 0 && todosTotal > 0 && !isPlanTodoSummaryExpanded(wrapper)) {
+            const attemptKey = `${messageId}::${label}::${title}`;
+            const attempts = getPlanTodoExpandAttempts();
+            if (!attempts[attemptKey]) {
+              attempts[attemptKey] = true;
+              const clickable = wrapper.querySelector('.todo-summary-content-clickable') as HTMLElement | null;
+              if (clickable) clickable.click();
+            }
           }
 
           if (todos.length > 0 && todosTotal === 0) {
