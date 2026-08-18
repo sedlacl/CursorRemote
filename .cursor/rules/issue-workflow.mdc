@@ -1,5 +1,5 @@
 ---
-description: Standardní smyčka — projdi docs/issues, oprav, changelog, smaž vyřešené
+description: docs/issues — triage, fix, changelog, smazat hotové (fixed/closed/done)
 globs: docs/issues/**
 alwaysApply: false
 ---
@@ -8,6 +8,32 @@ alwaysApply: false
 
 Standardní postup pro nahlášené bugy v `docs/issues/`. Formát souborů a `.artifacts/` viz
 `docs/issues/README.md`.
+
+## Hotové issues se mažou
+
+Issue markdown je jen triage — **ne historie**. Po shipped fixu soubor **smaž**, neupdatuj na
+`Status: fixed` a nenechávej ho ležet.
+
+| Status v issue (case-insensitive) | Akce |
+| --- | --- |
+| `fixed`, `closed`, `done`, `implemented` | Smaž `*.md` + související artefakty (viz níže) |
+| otevřené / bez uzavíracího statusu | **Nemaž** |
+
+Uzavření ve **stejném kroku** jako fix + changelog + zelená verifikace (`npm test`, build, u UI
+vizuální kontrola). Neodkládat „až později“.
+
+### Co smazat s issue
+
+1. Markdown v `docs/issues/` (`YYYY-MM-DD-*.md`).
+2. `docs/issues/.artifacts/<issueId>/` (gitignored dump k UI reportu).
+3. Raw dumpy k tomu issue, pokud existují: `temp/ui-reports/<reportId>/`, `temp/diag-*` použité
+   při analýze stejného reportu / Diagnostic ID.
+
+### README
+
+Po smazání doplň sekci **Stav** v `docs/issues/README.md`: krátký řádek pod **Smazáno** (název
+souboru, verze fixu, volitelně artefakt) — jako u dřívějších flicker / approval issues. Otevřené
+issues v README neuváděj jako smazané.
 
 ## Kdy
 
@@ -46,15 +72,15 @@ pocitu hotovo.
 User-facing fix → `changelog.mdc`: dated sekce, SemVer bump, **žádné `[Unreleased]`**, datum =
 den implementace. Stejný den = doplň do existující verze.
 
-### 6. Uklid (až po zelené verifikaci)
+### 6. Uklid (stejný krok jako uzavření)
 
-Teprve když testy + build projdou (a u UI i vizuální kontrola):
+Teprve když testy + build projdou (a u UI i vizuální kontrola) — viz **Hotové issues se mažou**:
 
-1. Smaž vyřešené issue `*.md`.
-2. Smaž `docs/issues/.artifacts/<issueId>/` u těchto issues.
-3. Aktualizuj sekci **Stav** v `docs/issues/README.md` (co smazáno, zda zbývají otevřené).
+1. Smaž issue `*.md` (už ne `Status: fixed` v souboru — soubor pryč).
+2. Smaž `.artifacts/<issueId>/` a související `temp/ui-reports/`, `temp/diag-*`.
+3. Aktualizuj **Stav** v `docs/issues/README.md` (řádek pod **Smazáno**; **Otevřené** aktuální).
 
-Fix zůstává v kódu — issue soubor je jen triage, ne historie.
+Fix zůstává v kódu a changelogu.
 
 ### 7. Non-actionable reporty
 
