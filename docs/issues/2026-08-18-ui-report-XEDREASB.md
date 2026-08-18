@@ -1,6 +1,6 @@
 # Po načtení historie se subagent notifikace změní v bubliny You
 
-- Status: open
+- Status: fixed (0.3.11) — `storedBubbleToChatElement` maps type=1 `<system_notification>` / `kind: subagent` to `thought` with id `transcript:notification:<uuid>` so `load_history` merge no longer creates You XML bubbles.
 - Date: 2026-08-18
 - Diagnostic ID: JYF35XMB
 - Issue ID: XEDREASB

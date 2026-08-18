@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [0.3.11] - 2026-08-18
 
 ### Fixed
+- **Subagent completion stays compact after history load**: Cursor storage type=1 bubbles with `<system_notification>` / `kind: subagent` map to the same compact `thought` rows as the live extractor (`transcript:notification:<id>`), instead of duplicate You bubbles filled with raw XML.
 - **Plan todo block no longer flickers on poll**: the extractor reads current Cursor items (`li.ui-todo-item`) instead of the obsolete `.todo-summary-item` list, and it no longer clicks an already-expanded “Build Plan in Parallel” / “Build” header every 300 ms. A collapsed plan is expanded at most once per plan id.
 
 ## [0.3.10] - 2026-08-07

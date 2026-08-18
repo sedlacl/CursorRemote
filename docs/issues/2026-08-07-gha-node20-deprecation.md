@@ -1,6 +1,6 @@
 # GitHub Actions Node 20 deprecation on release workflow
 
-- Status: open
+- Status: fixed
 - Date: 2026-08-07
 - Diagnostic ID: —
 - Report: —
@@ -23,23 +23,23 @@ Observed on release of **v0.3.10** (2026-08-07).
 
 ## Evidence
 
-- Workflow still pins:
-  - `actions/checkout@v4` (`.github/workflows/release.yml` ~L27)
-  - `actions/setup-node@v4` with `node-version: 22` (~L30–33)
+- Release workflow now pins:
+  - `actions/checkout@v7` (`.github/workflows/release.yml` ~L27)
+  - `actions/setup-node@v7` with `node-version: 22` (~L30–33)
 - GitHub changelog: [Deprecation of Node 20 on GitHub Actions runners](https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/)
 - Annotation path reported as `.github#2` on the failed-to-upgrade actions (warning only).
 
-## Likely cause
+## Fixed
 
-`checkout@v4` / `setup-node@v4` still ship action runtimes targeting Node 20. GitHub is forcing Node 24 on runners and will eventually remove Node 20 support, so these major versions need a bump (typically `@v5` once stable and compatible).
+Upgraded `actions/checkout` and `actions/setup-node` from `@v4` to their current stable
+major `@v7`. Both actions use the Node 24 action runtime, removing the Node 20 deprecation
+warning; the project runtime remains Node 22.
 
-## Suggested fix (not applied)
+## Verification
 
-1. Bump in `.github/workflows/release.yml`:
-   - `actions/checkout@v4` → `@v5` (or current recommended major).
-   - `actions/setup-node@v4` → `@v5` (keep `node-version: 22` unless docs require otherwise).
-2. Re-run Release via `workflow_dispatch` or next patch tag and confirm the annotation is gone.
-3. Scan the repo for any other workflows using `@v4` of those actions (currently only `release.yml`).
+1. Confirmed `.github/workflows/release.yml` is the only workflow.
+2. Confirmed no used workflow action retains a Node 16 or Node 20 runtime reference.
+3. A future `workflow_dispatch` or release tag should confirm that GitHub no longer emits the annotation.
 
 ## Out of scope / follow-ups
 

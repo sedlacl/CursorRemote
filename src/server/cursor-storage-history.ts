@@ -200,7 +200,8 @@ function readBubbleBatch(
   return out;
 }
 
-function storedBubbleToChatElement(
+/** Exported for unit tests — Cursor storage type=1 includes synthetic subagent notifications. */
+export function storedBubbleToChatElement(
   header: CursorComposerHeader,
   bubble: CursorStoredBubble,
   flatIndex: number
@@ -209,6 +210,18 @@ function storedBubbleToChatElement(
   const text = (bubble.text ?? '').trim();
 
   if (header.type === 1 || bubble.type === 1) {
+    const notification = parseSubagentSystemNotification(text);
+    if (notification) {
+      return {
+        type: 'thought',
+        id: `transcript:notification:${id}`,
+        flatIndex,
+        duration: '',
+        action: notification.action,
+        detail: notification.detail,
+        thoughtKind: 'step_summary',
+      };
+    }
     return {
       type: 'human',
       id,
@@ -269,6 +282,23 @@ function safeJsonParse<T>(raw: string): T | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Cursor stores Multitask subagent-completion rows as type=1 bubbles whose
+ * text is a `<system_notification>` XML payload. Live DOM shows them as
+ * compact `notification:<id>` thought rows, not human messages.
+ */
+function parseSubagentSystemNotification(text: string): { action: string; detail: string } | null {
+  if (!text.includes('<system_notification>') || !/\bkind:\s*subagent\b/.test(text)) {
+    return null;
+  }
+  const title = text.match(/^\s*title:\s*(.+)$/m)?.[1]?.trim() || 'subagent';
+  const status = (text.match(/^\s*status:\s*(\S+)/m)?.[1] ?? '').toLowerCase();
+  const action = status === 'error' || status === 'failed' || status === 'failure'
+    ? 'Failed'
+    : 'Finished';
+  return { action, detail: title };
 }
 
 function richTextToPlainText(raw: string | undefined): string {

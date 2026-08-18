@@ -28,12 +28,12 @@ na artefakty — neinlineuje raw HTML/PNG.
 
 Ověřeno proti kódu / Release CI 2026-08-07. Hotové issues se mažou (fix zůstává v kódu).
 
-Otevřené:
+Otevřené: žádné.
 
-- `2026-08-18-ui-report-XEDREASB.md` — po `load_history` se subagent completion notifikace z Cursor storage vykreslí jako bubliny You s raw XML.
-- `2026-08-07-gha-node20-deprecation.md` — warning Node 20 deprecation u `checkout@v4` / `setup-node@v4` v Release workflow (zatím neblokuje).
+Opraveno 2026-08-18 (0.3.11): `2026-08-18-ui-report-XEDREASB.md` — storage type=1 subagent notifikace se mapují na thought (`transcript:notification:<id>`), ne na bubliny You.
 
 Smazáno 2026-08-18 (opraveno v 0.3.11): `2026-08-18-plan-todo-expand-flicker.md` (+ dump `temp/diag-usy-aflex-initdatag01/`).
+Opraveno 2026-08-18 (CI-only): GHA Node 20 deprecation issue uses actions checkout and setup-node v7.
 
 Smazáno 2026-08-06 (opraveno v 0.3.7): `2026-08-06-approval-card-shows-allow-as-command`,
 `2026-08-06-model-sheet-shows-effort-settings`. Smazáno jako non-actionable (prázdný New Agent,
