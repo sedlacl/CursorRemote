@@ -1,5 +1,18 @@
 import type { CursorState } from '../../server/types.js';
 
+const LIVE_AGENT_STATUSES = new Set<CursorState['agentStatus']>([
+  'generating',
+  'running_subagents',
+  'running_tool',
+  'thinking',
+]);
+
+function isLoadingEmptyTranscript(state: CursorState): boolean {
+  return state.messages.length === 0
+    && !!state.agentStatus
+    && LIVE_AGENT_STATUSES.has(state.agentStatus);
+}
+
 export interface ConnectionUiState {
   status: 'connected' | 'reconnecting' | 'stale';
   label: string;
@@ -31,6 +44,14 @@ export function getConnectionUiState(state: CursorState, socketConnected: boolea
       label: 'Stale',
       emptyPrimary: 'No fresh Cursor state yet.',
       emptyHint: lastError ? `Last extractor error: ${lastError}` : 'Waiting for a fresh extraction.',
+    };
+  }
+  if (isLoadingEmptyTranscript(state)) {
+    return {
+      status: 'connected',
+      label: 'Connected',
+      emptyPrimary: 'Loading transcript…',
+      emptyHint: 'The agent is active but this chat transcript has not loaded yet. It should appear shortly.',
     };
   }
   return {

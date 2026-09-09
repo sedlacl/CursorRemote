@@ -49,6 +49,8 @@ export interface DiagnosticStateSnapshot {
   mode: CursorState['mode'];
   model: CursorState['model'];
   gitStatus: CursorState['gitStatus'];
+  agentChanges: CursorState['agentChanges'];
+  globalApprovalNotifications: CursorState['globalApprovalNotifications'];
   /** Sanitized Multitask workers (no `_capabilities` / selector paths). */
   subagents: {
     runningCount: number;
@@ -214,6 +216,8 @@ export class DiagnosticSnapshotService {
       mode: state.mode,
       model: state.model,
       gitStatus: state.gitStatus,
+      agentChanges: state.agentChanges,
+      globalApprovalNotifications: state.globalApprovalNotifications,
       subagents: {
         runningCount: state.subagents?.runningCount ?? 0,
         summary: state.subagents?.summary ?? '',

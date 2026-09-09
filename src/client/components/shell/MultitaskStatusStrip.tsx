@@ -30,6 +30,7 @@ export function MultitaskStatusStrip({ subagents, agentChanges }: MultitaskStatu
   const hasChanges = (agentChanges?.fileCount || 0) > 0
     || !!agentChanges?.reviewAvailable
     || !!agentChanges?.undoAllAvailable;
+  const showAgentChanges = hasChanges && (subagents?.runningCount || 0) === 0;
 
   const clickAction = (selectorPath: string | undefined) => {
     if (selectorPath) command.emit('command:click_action', { selectorPath });
@@ -136,7 +137,7 @@ export function MultitaskStatusStrip({ subagents, agentChanges }: MultitaskStatu
           </div>
         </div>
       )}
-      {hasChanges && (
+      {showAgentChanges && (
         <div className="agent-changes-section">
           <span className="agent-changes-count">
             {agentChanges?.fileCount || 0} changed file{agentChanges?.fileCount === 1 ? '' : 's'}

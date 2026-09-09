@@ -47,9 +47,10 @@ issues v README neuváděj jako smazané.
 Načti všechny otevřené `*.md` z **obou** míst (viz `docs/issues/README.md` → „Kde reporty hledat"):
 
 1. `docs/issues/` v repu — reporty z `npm run dev`.
-2. `%USERPROFILE%\.cursor\extensions\qjohn.cursor-remote-*\docs\issues\` — reporty z instalované
-   extension. Tady jich bývá většina a `git status` je neukáže; nikdy netvrď „otevřené: žádné"
-   jen podle repa.
+2. `%APPDATA%\Cursor\User\globalStorage\qjohn.cursor-remote\issues\` — persistentní reporty
+   z instalované extension. `git status` je neukáže; nikdy netvrď „otevřené: žádné" jen
+   podle repa. U verzí před 0.3.12 zkontroluj také legacy
+   `%USERPROFILE%\.cursor\extensions\qjohn.cursor-remote-*\docs\issues\`.
 
 Roztřiď je:
 

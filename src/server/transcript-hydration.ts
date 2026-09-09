@@ -64,6 +64,17 @@ export function restoreCachedMessagesIfUnhydrated(
   return incoming;
 }
 
+export async function loadStoredMessagesIfUnhydrated(
+  state: Pick<CursorState, 'activeComposerId' | 'chatTabs' | 'messages' | 'agentStatus' | 'subagents' | 'agentChanges' | '_rawSignals'>,
+  loadHistory: (composerId: string) => Promise<{ messages: ChatElement[]; loadedBubbles: number } | null>,
+): Promise<{ messages: ChatElement[]; loadedBubbles: number } | null> {
+  if (!looksLikeUnhydratedTranscript(state)) return null;
+  const composerId = resolveComposerCacheKey(state);
+  if (!composerId) return null;
+  const stored = await loadHistory(composerId);
+  return stored && stored.loadedBubbles > 0 && stored.messages.length > 0 ? stored : null;
+}
+
 const TRANSCRIPT_NUDGE_HELPERS_JS = `
   function findTranscriptNudgePoint() {
     const root = document.querySelector('.composer-react-transcript-root[data-react-transcript-root]')

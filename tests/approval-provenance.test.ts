@@ -7,6 +7,7 @@ import {
   buildApprovalRegistry,
   filterContextLocalApprovals,
   resolveApprovalActionSelector,
+  resolveApprovalTargetTab,
 } from '../src/server/approval-registry.js';
 import type { CursorState } from '../src/server/types.js';
 import type { WindowSnapshot } from '../src/server/window-monitor.js';
@@ -278,6 +279,114 @@ describe('navigate_to_approval registry resolve', () => {
     const target = registry.get('tool:known');
     assert.equal(target?.tabTitle, 'Tests');
     assert.equal(target?.composerId, 'composer-z');
+  });
+});
+
+describe('cross-window approval target resolution', () => {
+  it('keeps the owning window and re-resolves the composer in a fresh snapshot', () => {
+    const approval = {
+      id: 'tool:window-b',
+      description: 'npm test',
+      composerId: 'composer-b',
+      actions: [{ label: 'Run', type: 'approve' as const, selectorPath: '#run-b' }],
+    };
+    const snapshots = new Map<string, WindowSnapshot>([
+      ['win-a', {
+        windowId: 'win-a',
+        windowTitle: 'Project A',
+        messages: [],
+        chatTabs: [{ composerId: 'composer-a', title: 'Active A', isActive: true, status: 'active', selectorPath: '', source: 'open', workStatus: 'idle' }],
+        pendingApprovals: [],
+        agentStatus: 'idle',
+        agentActivityText: null,
+        agentActivityLive: false,
+        agentActivitySource: 'none',
+        composerQueue: { items: [] },
+        mode: { current: 'agent', available: [] },
+        model: { current: 'Auto', currentId: '' },
+        lastUpdated: 1000,
+        activeComposerId: 'composer-a',
+      }],
+      ['win-b', {
+        windowId: 'win-b',
+        windowTitle: 'Project B',
+        messages: [],
+        chatTabs: [{ composerId: 'composer-b', title: 'FinishedDeploy', isActive: false, status: 'idle', selectorPath: '', source: 'sidebar', workStatus: 'completed' }],
+        pendingApprovals: [approval],
+        agentStatus: 'waiting_approval',
+        agentActivityText: null,
+        agentActivityLive: false,
+        agentActivitySource: 'none',
+        composerQueue: { items: [] },
+        mode: { current: 'agent', available: [] },
+        model: { current: 'Auto', currentId: '' },
+        lastUpdated: 2000,
+        activeComposerId: 'composer-b',
+      }],
+    ]);
+
+    const { registry } = buildApprovalRegistry(snapshots);
+    const target = registry.get('tool:window-b');
+    assert.equal(target?.windowId, 'win-b');
+    assert.equal(target?.tabTitle, 'Deploy');
+
+    const freshTab = resolveApprovalTargetTab(target!, [
+      { composerId: 'composer-b', title: 'Deploy', isActive: false, status: 'idle', selectorPath: '', source: 'sidebar', workStatus: 'completed' },
+    ]);
+    assert.equal(freshTab.matchedBy, 'composer');
+    assert.equal(freshTab.tabTitle, 'Deploy');
+    assert.equal(freshTab.tabSource, 'sidebar');
+  });
+
+  it('does not fall back to another active tab for an unknown composer', () => {
+    const snapshots = new Map<string, WindowSnapshot>([
+      ['win-a', {
+        windowId: 'win-a',
+        windowTitle: 'Project A',
+        messages: [],
+        chatTabs: [{ composerId: 'composer-a', title: 'Active A', isActive: true, status: 'active', selectorPath: '', source: 'open', workStatus: 'idle' }],
+        pendingApprovals: [],
+        agentStatus: 'idle',
+        agentActivityText: null,
+        agentActivityLive: false,
+        agentActivitySource: 'none',
+        composerQueue: { items: [] },
+        mode: { current: 'agent', available: [] },
+        model: { current: 'Auto', currentId: '' },
+        lastUpdated: 1000,
+        activeComposerId: 'composer-a',
+      }],
+      ['win-b', {
+        windowId: 'win-b',
+        windowTitle: 'Project B',
+        messages: [],
+        chatTabs: [{ composerId: 'composer-b-active', title: 'Active B', isActive: true, status: 'active', selectorPath: '', source: 'open', workStatus: 'idle' }],
+        pendingApprovals: [{
+          id: 'tool:unknown-composer',
+          description: 'npm test',
+          composerId: 'composer-missing',
+          actions: [{ label: 'Run', type: 'approve' as const, selectorPath: '#run' }],
+        }],
+        agentStatus: 'waiting_approval',
+        agentActivityText: null,
+        agentActivityLive: false,
+        agentActivitySource: 'none',
+        composerQueue: { items: [] },
+        mode: { current: 'agent', available: [] },
+        model: { current: 'Auto', currentId: '' },
+        lastUpdated: 2000,
+        activeComposerId: 'composer-b-active',
+      }],
+    ]);
+
+    const { registry } = buildApprovalRegistry(snapshots);
+    const target = registry.get('tool:unknown-composer');
+    assert.equal(target?.windowId, 'win-b');
+    assert.equal(target?.tabTitle, '');
+
+    const resolved = resolveApprovalTargetTab(target!, snapshots.get('win-b')!.chatTabs);
+    assert.equal(resolved.matchedBy, 'none');
+    assert.equal(resolved.tabTitle, '');
   });
 });
 

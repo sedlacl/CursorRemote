@@ -710,6 +710,7 @@ export class CommandExecutor {
           function cleanTabTitle(raw) {
             let t = (raw || '').trim().replace(/\\s+/g, ' ');
             t = t.replace(/(@[\\w./]+)+\\s*$/, '');
+            t = t.replace(/^(?:Finished|Running)(?=[A-Z0-9])/, '');
             return t.trim().substring(0, 120);
           }
           function glassCompositeForBtn(btn) {
@@ -724,7 +725,7 @@ export class CommandExecutor {
               const g = cleanTabTitle(rawGroup);
               if (g) composite = (g + ' / ' + cleanTabTitle(rawAgent)).substring(0, 120);
             }
-            return { composite: norm(composite), agentOnly: norm(rawAgent) };
+            return { composite: norm(composite), agentOnly: norm(cleanTabTitle(rawAgent)) };
           }
           const glassBtns = Array.from(document.querySelectorAll(
             '.glass-sidebar-agent-list-container li.ui-sidebar-menu-item > div.glass-sidebar-agent-menu-btn'
@@ -754,7 +755,7 @@ export class CommandExecutor {
           for (const tab of Array.from(editorTabs)) {
             const ariaLabel = tab.getAttribute('aria-label') || '';
             const rawTitle = (ariaLabel.split(',')[0] || (tab.textContent || '')).trim();
-            const text = norm(rawTitle);
+            const text = norm(cleanTabTitle(rawTitle));
             if (text === target) {
               tab.click();
               return true;
@@ -763,7 +764,7 @@ export class CommandExecutor {
           const cells = document.querySelectorAll('.agent-sidebar-cell');
           for (const cell of Array.from(cells)) {
             const titleEl = cell.querySelector('.agent-sidebar-cell-text');
-            const text = norm(titleEl ? (titleEl.textContent || '') : (cell.textContent || ''));
+            const text = norm(cleanTabTitle(titleEl ? (titleEl.textContent || '') : (cell.textContent || '')));
             if (text === target) {
               cell.click();
               return true;
@@ -771,7 +772,7 @@ export class CommandExecutor {
           }
           for (const cell of Array.from(cells)) {
             const titleEl = cell.querySelector('.agent-sidebar-cell-text');
-            const text = norm(titleEl ? (titleEl.textContent || '') : (cell.textContent || ''));
+            const text = norm(cleanTabTitle(titleEl ? (titleEl.textContent || '') : (cell.textContent || '')));
             if (text.startsWith(target) || target.startsWith(text)) {
               cell.click();
               return true;
@@ -1618,6 +1619,7 @@ export class CommandExecutor {
         function cleanTabTitle(raw) {
           let t = (raw || '').trim().replace(/\\s+/g, ' ');
           t = t.replace(/(@[\\w./]+)+\\s*$/, '');
+          t = t.replace(/^(?:Finished|Running)(?=[A-Z0-9])/, '');
           return t.trim().substring(0, 120);
         }
         function glassCompositeForBtn(btn) {
@@ -1632,7 +1634,7 @@ export class CommandExecutor {
             const g = cleanTabTitle(rawGroup);
             if (g) composite = (g + ' / ' + cleanTabTitle(rawAgent)).substring(0, 120);
           }
-          return { composite: norm(composite), agentOnly: norm(rawAgent) };
+          return { composite: norm(composite), agentOnly: norm(cleanTabTitle(rawAgent)) };
         }
         const glassBtns = Array.from(document.querySelectorAll(
           '.glass-sidebar-agent-list-container li.ui-sidebar-menu-item > div.glass-sidebar-agent-menu-btn'
@@ -1656,7 +1658,7 @@ export class CommandExecutor {
         const cells = document.querySelectorAll('.agent-sidebar-cell');
         for (const cell of Array.from(cells)) {
           const titleEl = cell.querySelector('.agent-sidebar-cell-text');
-          const text = norm(titleEl ? (titleEl.textContent || '') : (cell.textContent || ''));
+          const text = norm(cleanTabTitle(titleEl ? (titleEl.textContent || '') : (cell.textContent || '')));
           if (text === target) {
             cell.click();
             return true;
@@ -1664,7 +1666,7 @@ export class CommandExecutor {
         }
         for (const cell of Array.from(cells)) {
           const titleEl = cell.querySelector('.agent-sidebar-cell-text');
-          const text = norm(titleEl ? (titleEl.textContent || '') : (cell.textContent || ''));
+          const text = norm(cleanTabTitle(titleEl ? (titleEl.textContent || '') : (cell.textContent || '')));
           if (text.startsWith(target) || target.startsWith(text)) {
             cell.click();
             return true;
@@ -1685,7 +1687,12 @@ export class CommandExecutor {
         const composerId = ${JSON.stringify(composerId ?? '')};
         const title = ${JSON.stringify(tabTitle ?? '')};
         const norm = s => s.trim().replace(/\\s+/g, ' ').toLowerCase();
-        const target = norm(title);
+        const cleanTabTitle = raw => {
+          let t = (raw || '').trim().replace(/\\s+/g, ' ');
+          t = t.replace(/(@[\\w./]+)+\\s*$/, '');
+          return t.replace(/^(?:Finished|Running)(?=[A-Z0-9])/, '').trim().substring(0, 120);
+        };
+        const target = norm(cleanTabTitle(title));
         const tabs = Array.from(document.querySelectorAll(
           '.tabs-container .tab[aria-label*="Chat Editors"], .editor-group-container.has-composer-editor .tab[role="tab"]'
         ));
@@ -1697,7 +1704,7 @@ export class CommandExecutor {
           tab = tabs.find(t => {
             const aria = t.getAttribute('aria-label') || '';
             const raw = (aria.split(',')[0] || (t.textContent || '')).trim();
-            return norm(raw) === target;
+            return norm(cleanTabTitle(raw)) === target;
           }) || null;
         }
         if (!tab) return null;
@@ -1721,7 +1728,12 @@ export class CommandExecutor {
         const composerId = ${JSON.stringify(composerId ?? '')};
         const title = ${JSON.stringify(tabTitle ?? '')};
         const norm = s => s.trim().replace(/\\s+/g, ' ').toLowerCase();
-        const target = norm(title);
+        const cleanTabTitle = raw => {
+          let t = (raw || '').trim().replace(/\\s+/g, ' ');
+          t = t.replace(/(@[\\w./]+)+\\s*$/, '');
+          return t.replace(/^(?:Finished|Running)(?=[A-Z0-9])/, '').trim().substring(0, 120);
+        };
+        const target = norm(cleanTabTitle(title));
         const tabs = Array.from(document.querySelectorAll(
           '.tabs-container .tab[aria-label*="Chat Editors"], .editor-group-container.has-composer-editor .tab[role="tab"]'
         ));
@@ -1733,7 +1745,7 @@ export class CommandExecutor {
           tab = tabs.find(t => {
             const aria = t.getAttribute('aria-label') || '';
             const raw = (aria.split(',')[0] || (t.textContent || '')).trim();
-            return norm(raw) === target;
+            return norm(cleanTabTitle(raw)) === target;
           }) || null;
         }
         if (!tab) return null;

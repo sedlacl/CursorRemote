@@ -29,9 +29,11 @@ export interface WorkspaceIdentityInput {
 
 /** Stable workspace key shared by extension push and CDP window titles. */
 export function resolveWorkspaceIdentity(input: WorkspaceIdentityInput): string {
-  const basename = input.workspacePath
+  const folderBasename = input.workspacePath
     ? basenameFromPath(input.workspacePath)
-    : (input.workspaceName ?? 'unknown');
+    : null;
+  const trimmedName = input.workspaceName?.trim();
+  const basename = trimmedName || folderBasename || 'unknown';
   if (input.includeQualifier === false || !input.authority) return basename;
   const qualifier = authorityToQualifier(input.authority);
   return qualifier ? `${basename} ${qualifier}` : basename;

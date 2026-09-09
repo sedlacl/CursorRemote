@@ -26,15 +26,28 @@ export async function extractWorkspaceName(client: CdpClient, includeQualifier =
         try {
           const ws = vscode.context.configuration().workspace;
           if (!ws || !ws.uri) return null;
-          return JSON.stringify({ path: ws.uri.path, authority: ws.uri.authority || '' });
+          return JSON.stringify({
+            path: ws.uri.path,
+            authority: ws.uri.authority || '',
+            name: typeof ws.name === 'string' ? ws.name : '',
+            documentTitle: typeof document !== 'undefined' ? document.title || '' : '',
+          });
         } catch { return null; }
       })()
     `, 3000);
     if (!raw || typeof raw !== 'string') return null;
-    const { path, authority } = JSON.parse(raw) as { path: string; authority: string };
+    const { path, authority, name, documentTitle } = JSON.parse(raw) as {
+      path: string;
+      authority: string;
+      name?: string;
+      documentTitle?: string;
+    };
     if (!path) return null;
+    const workspaceName = name?.trim()
+      || (documentTitle ? parseCdpTitle(documentTitle) : undefined);
     return resolveWorkspaceIdentity({
       workspacePath: path,
+      workspaceName,
       authority,
       includeQualifier,
     });
@@ -54,7 +67,8 @@ export function parseCdpTitle(raw: string): string {
   if (dashParts.length >= 3) {
     title = dashParts[dashParts.length - 2];
   } else if (dashParts.length === 2) {
-    title = dashParts[dashParts.length - 1];
+    // "workspaceName - profileName" (no open editor segment)
+    title = dashParts[0];
   }
   return title.trim();
 }

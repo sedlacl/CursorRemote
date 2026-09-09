@@ -20,34 +20,59 @@ export interface ResolvedApprovalTarget {
   timestamp: number;
 }
 
+export interface ApprovalTabResolution {
+  tabTitle: string;
+  tabSource?: 'open' | 'sidebar';
+  matchedBy: 'composer' | 'title' | 'none';
+}
+
+function cleanApprovalTabTitle(raw: string): string {
+  const title = cleanTabTitle(raw);
+  return title.replace(/^(?:Finished|Running)(?=[A-Z0-9])/, '').trim();
+}
+
 function activeChatTitle(chatTabs: ChatTab[]): string {
   const active = chatTabs.find((t) => t.isActive)
     ?? (chatTabs.length === 1 ? chatTabs[0] : undefined);
-  return active ? cleanTabTitle(active.title) : '';
+  return active ? cleanApprovalTabTitle(active.title) : '';
 }
 
 function resolveTabForComposer(
   chatTabs: ChatTab[],
   composerId: string,
   fallbackTitle: string,
-): { tabTitle: string; tabSource?: 'open' | 'sidebar' } {
-  if (composerId) {
-    const byComposer = chatTabs.find((t) => t.composerId === composerId);
+): ApprovalTabResolution {
+  const normalizedComposerId = composerId.trim();
+  if (normalizedComposerId) {
+    const byComposer = chatTabs.find((t) => t.composerId === normalizedComposerId);
     if (byComposer) {
-      return { tabTitle: cleanTabTitle(byComposer.title), tabSource: byComposer.source };
+      return {
+        tabTitle: cleanApprovalTabTitle(byComposer.title),
+        tabSource: byComposer.source,
+        matchedBy: 'composer',
+      };
     }
   }
+
+  const normalizedFallbackTitle = cleanApprovalTabTitle(fallbackTitle);
   if (fallbackTitle) {
-    const byTitle = chatTabs.find((t) => cleanTabTitle(t.title) === fallbackTitle);
+    const byTitle = chatTabs.find((t) => cleanApprovalTabTitle(t.title) === normalizedFallbackTitle);
     if (byTitle) {
-      return { tabTitle: cleanTabTitle(byTitle.title), tabSource: byTitle.source };
+      return {
+        tabTitle: cleanApprovalTabTitle(byTitle.title),
+        tabSource: byTitle.source,
+        matchedBy: 'title',
+      };
     }
   }
-  const active = chatTabs.find((t) => t.isActive);
-  if (active) {
-    return { tabTitle: cleanTabTitle(active.title), tabSource: active.source };
-  }
-  return { tabTitle: fallbackTitle };
+
+  // An approval with a composer provenance must never be redirected to an
+  // unrelated active tab when that composer disappeared from the snapshot.
+  // The caller can report the target window/title instead of executing there.
+  return {
+    tabTitle: normalizedFallbackTitle,
+    matchedBy: 'none',
+  };
 }
 
 function approvalSummary(approval: Approval): string {
@@ -66,7 +91,10 @@ function enrichApproval(
   timestamp: number,
 ): Approval {
   const composerId = approval.composerId || activeComposerId || '';
-  const chatTitle = approval.chatTitle || activeChatTitle(chatTabs);
+  const resolvedTab = resolveTabForComposer(chatTabs, composerId, approval.chatTitle || '');
+  const chatTitle = cleanApprovalTabTitle(approval.chatTitle || resolvedTab.tabTitle) || (
+    composerId ? '' : activeChatTitle(chatTabs)
+  );
   return {
     ...approval,
     windowId,
@@ -113,12 +141,23 @@ function toTarget(
     windowId: approval.windowId || '',
     windowTitle: '',
     composerId: approval.composerId || '',
-    chatTitle: approval.chatTitle || tab.tabTitle,
+    chatTitle: cleanApprovalTabTitle(approval.chatTitle || tab.tabTitle),
     tabTitle: tab.tabTitle,
     tabSource: tab.tabSource,
     actions: approval.actions,
     timestamp,
   };
+}
+
+export function resolveApprovalTargetTab(
+  target: Pick<ResolvedApprovalTarget, 'composerId' | 'chatTitle' | 'tabTitle'>,
+  chatTabs: ChatTab[],
+): ApprovalTabResolution {
+  return resolveTabForComposer(
+    chatTabs,
+    target.composerId,
+    target.chatTitle || target.tabTitle,
+  );
 }
 
 export function filterContextLocalApprovals(

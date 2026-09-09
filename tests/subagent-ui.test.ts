@@ -122,4 +122,34 @@ describe('MultitaskStatusStrip subagent controls', () => {
     assert.equal(env.command.awaited.at(-1)?.event, 'command:stop_subagent');
     assert.equal(env.command.awaited.at(-1)?.payload.subagentId, 'subagent:probe|gpt-5.6');
   });
+
+  it('hides agent changes section while subagents are running', async () => {
+    const env = createComponentTestEnv();
+    cleanup = env.cleanup;
+    env.render(
+      React.createElement(MultitaskStatusStrip, {
+        subagents: singleRunningSubagent,
+        agentChanges: { fileCount: 37, reviewAvailable: true, reviewSelectorPath: 'review' },
+      }),
+    );
+    await act(async () => {});
+
+    assert.equal(env.document.querySelector('.agent-changes-section'), null);
+    assert.ok(env.document.querySelector('.multitask-header-stop-btn'));
+    assert.ok(env.document.querySelector('.subagent-list'));
+  });
+
+  it('shows agent changes section when idle with changes', async () => {
+    const env = createComponentTestEnv();
+    cleanup = env.cleanup;
+    env.render(
+      React.createElement(MultitaskStatusStrip, {
+        agentChanges: { fileCount: 3, reviewAvailable: true, reviewSelectorPath: 'review' },
+      }),
+    );
+    await act(async () => {});
+
+    assert.ok(env.document.querySelector('.agent-changes-section'));
+    assert.match(env.document.querySelector('.agent-changes-count')?.textContent || '', /3 changed file/);
+  });
 });

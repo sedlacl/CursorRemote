@@ -120,11 +120,11 @@ screenshot, and sanitized state, and writes:
 - `docs/issues/.artifacts/<issueId>/` (gitignored: `web-dom.html`, `web-screenshot.png`,
   `state.json`, `cursor-dom-*.html`, `cursor-screenshot.png`, `meta.json`)
 
-Both paths are relative to the **running relay's `packageRoot`** (`resolvePackageRoot()` in
-`src/server/relay.ts`), which is the repo only under `npm run dev`. When the relay runs from the
-installed extension, reports land in
-`%USERPROFILE%\.cursor\extensions\qjohn.cursor-remote-<version>-universal\docs\issues\` — outside
-the repo and invisible to `git status`. See `docs/issues/README.md` for the triage lookup.
+Under `npm run dev`, both paths are relative to the repo. An installed extension sets
+`UI_REPORTS_DIR` to persistent global storage:
+`%APPDATA%\Cursor\User\globalStorage\qjohn.cursor-remote\issues\`. This survives VSIX updates;
+0.3.12 also migrates missing legacy reports from prior extension directories. See
+`docs/issues/README.md` for the triage lookup.
 
 Response JSON includes `issueId`, `issuePath`, `artifactsDir`, `agentPrompt`, and `warnings`
 (partial capture failures do not abort the issue write; missing web screenshot becomes a warning).
@@ -136,6 +136,7 @@ WEBAPP_PASSWORD=...          # enables auth on /debug/*
 DIAGNOSTIC_TOKEN=...         # optional agent Bearer for /debug/* without browser session
 DIAGNOSTIC_ID=ABCD1234       # optional; forces the Diagnostic ID instead of the stored one
 DATA_DIR=./data              # optional; holds diagnostic-id.json
+UI_REPORTS_DIR=...           # optional persistent root for UI report markdown + .artifacts
 DOM_EXPORT_MAX_BYTES=5242880 # optional; cursor DOM limit (default 5 MiB)
 ```
 

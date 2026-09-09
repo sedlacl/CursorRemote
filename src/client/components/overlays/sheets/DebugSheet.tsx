@@ -231,7 +231,7 @@ export function DebugSheet({
         <div className="debug-export-warning">
           Raw diagnostic HTML and snapshot API responses are not sanitized and may contain sensitive chats, code, terminals, paths, or secrets.
           Use <code>/debug/snapshot?id=&lt;Diagnostic ID&gt;</code> with session or <code>DIAGNOSTIC_TOKEN</code> Bearer auth.
-          <strong> Report</strong> hides this sheet, captures a web-client screenshot, asks for a short description, then sends DOM + note to the server (Cursor DOM/screenshot/state) and writes an issue under <code>docs/issues/</code>.
+          <strong> Report</strong> hides this sheet, captures a web-client screenshot, asks for a short description, then sends DOM + note to the server (Cursor DOM/screenshot/state) and writes an issue to the configured persistent issues folder.
         </div>
         <div className="debug-export-actions">
           <button

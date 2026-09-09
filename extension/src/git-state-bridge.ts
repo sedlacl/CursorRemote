@@ -19,7 +19,7 @@ import {
 import type { GitActionRequest, GitActionResult, GitScmSnapshot } from '../../src/shared/git-scm.js';
 import type { GitSnapshotReason } from '../../src/shared/diagnostics.js';
 import { snapshotSignature, type GitWindowSnapshotResult } from '../../src/shared/git-snapshot.js';
-import { resolveWorkspaceIdentity } from '../../src/shared/workspace-identity.js';
+import { basenameFromPath, resolveWorkspaceIdentity } from '../../src/shared/workspace-identity.js';
 import type { GitLocalStatusSummary } from './git-status-display.js';
 import type { HealthData } from './status-bar.js';
 
@@ -193,17 +193,26 @@ export class GitStateBridge implements vscode.Disposable {
     void this.pushFromSnapshot(this.lastLocalSnapshot);
   }
 
+  private resolveWorkspaceName(): string | undefined {
+    const configured = vscode.workspace.name?.trim();
+    if (configured) return configured;
+    const workspaceFile = vscode.workspace.workspaceFile;
+    if (!workspaceFile) return undefined;
+    return basenameFromPath(workspaceFile.fsPath).replace(/\.code-workspace$/i, '');
+  }
+
   private resolveWindowKey(): string {
     const folder = vscode.workspace.workspaceFolders?.[0];
     const includeQualifier = vscode.workspace
       .getConfiguration('cursorRemote')
       .get<boolean>('windowTitleQualifier', true);
+    const workspaceName = this.resolveWorkspaceName();
     if (!folder) {
-      return vscode.workspace.name ?? 'unknown';
+      return workspaceName ?? 'unknown';
     }
     return resolveWorkspaceIdentity({
       workspacePath: folder.uri.fsPath,
-      workspaceName: vscode.workspace.name,
+      workspaceName,
       authority: folder.uri.authority || undefined,
       includeQualifier,
     });

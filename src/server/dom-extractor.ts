@@ -2095,7 +2095,11 @@ export function extractionFunction(
         ).replace(/\s+/g, ' ').trim();
         if (!title) continue;
         const stopEl = job.querySelector('.composer-toolbar-background-job-item-stop[data-click-ready="true"]');
+        const openEl = job.matches('.composer-toolbar-background-job-item-clickable')
+          ? job
+          : job.querySelector('.composer-toolbar-background-job-item-clickable');
         addSubagent(title, undefined, 'running', 'Running', {
+          openSelectorPath: openEl ? buildSelectorPath(openEl) : undefined,
           stop: stopEl ? { kind: 'toolbarStop', matchTitle: title } : undefined,
           toolbarExpandSelectorPath: subagentToolbarExpandPath,
         });

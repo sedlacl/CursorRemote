@@ -13,7 +13,10 @@ import type { StateManager } from './state-manager.js';
 import type { CommandExecutor } from './command-executor.js';
 import type { CDPBridge } from './cdp-bridge.js';
 import type { WindowMonitor } from './window-monitor.js';
-import { resolveApprovalActionSelector } from './approval-registry.js';
+import {
+  resolveApprovalActionSelector,
+  resolveApprovalTargetTab,
+} from './approval-registry.js';
 import { CursorStorageHistory } from './cursor-storage-history.js';
 import type { ComposerStorageRelation } from './cursor-storage-history.js';
 import { markdownToWebHtml, readPlanFile } from './plan-files.js';
@@ -53,8 +56,16 @@ import {
   resolveReturnToParentTab,
   resolveReturnToParentTarget,
 } from './return-to-parent.js';
+import {
+  loadStoredMessagesIfUnhydrated,
+  looksLikeUnhydratedTranscript,
+  resolveComposerCacheKey,
+} from './transcript-hydration.js';
 
 const POST_COMMAND_REFRESH_DELAYS_MS = [0, 150, 450, 1000, 2000];
+const STORAGE_HYDRATION_RETRY_MS = 500;
+const STORAGE_HYDRATION_ATTEMPTS = 5;
+const STORAGE_HYDRATION_COOLDOWN_MS = 5000;
 
 interface ViteDevServer {
   middlewares: express.RequestHandler;
@@ -192,6 +203,8 @@ export class Relay {
   private sessionStore: WebappSessionStore;
   private loginAttempts = new Map<string, RateLimitEntry>();
   private storageIndexInFlight = false;
+  private readonly transcriptStorageHydrationInFlight = new Set<string>();
+  private readonly transcriptStorageHydrationLastAttemptAt = new Map<string, number>();
   private pendingWebDomCollects = new Map<string, (result: WebDomSnapshot | WebDomUnavailable) => void>();
 
   /** Max-Age for session cookie (30 days), aligned with typical “stay signed in” expectation. */
@@ -239,6 +252,7 @@ export class Relay {
     );
     this.uiReportService = new UiReportService(this.diagnosticSnapshotService, {
       packageRoot: resolvePackageRoot(),
+      issuesRoot: process.env.UI_REPORTS_DIR?.trim() || undefined,
       diagnosticId: SERVER_INSTANCE.diagnosticId,
     });
     this.storageHistory = new CursorStorageHistory(config.cursorStateDbPath);
@@ -1718,13 +1732,30 @@ export class Relay {
             this.stateManager.updateWindows(this.cdpBridge.windows, target.windowId);
             await waitForFreshExtraction(this.stateManager, genBefore, 4000);
           }
+
+          // Window switching invalidates the tab list used to build the global
+          // approval registry. Resolve the composer again from the fresh
+          // target-window snapshot before clicking anything.
+          const freshState = this.stateManager.getCurrentState();
+          const tab = resolveApprovalTargetTab(target, freshState.chatTabs);
+          if (tab.matchedBy === 'none') {
+            const windowLabel = target.windowTitle || target.windowId || 'unknown';
+            const tabLabel = target.chatTitle || target.tabTitle || '(unknown title)';
+            socket.emit('command:result', {
+              commandId: payload.commandId,
+              ok: false,
+              error: `Approval target not found in window "${windowLabel}" with title "${tabLabel}"`,
+            } satisfies CommandResult);
+            return;
+          }
+
           const scopeBefore = this.stateManager.historyScopeKey();
           const tabResult = await this.commandExecutor.switchTab(
             payload.commandId,
-            target.tabTitle,
+            tab.tabTitle,
             undefined,
             target.composerId,
-            target.tabSource,
+            tab.tabSource,
           );
           if (!tabResult.ok) {
             socket.emit('command:result', tabResult);
@@ -1768,16 +1799,61 @@ export class Relay {
 
   private setupStateForwarding(): void {
     this.stateManager.on('state:patch', (patch: Partial<CursorState>) => {
+      const state = this.stateManager.getCurrentState();
       if (patch.activeComposerId || patch.activeWindowId) {
-        const state = this.stateManager.getCurrentState();
         void this.refreshStorageRelations(state.activeComposerId, state.activeWindowId);
       }
+      this.maybeHydrateTranscriptFromStorage(state);
       this.io.emit('state:patch', sanitizePatchForClient(patch));
     });
 
     this.stateManager.on('connection:changed', (connected: boolean) => {
       this.io.emit('connection:status', { connected });
     });
+  }
+
+  private maybeHydrateTranscriptFromStorage(state: CursorState): void {
+    if (!looksLikeUnhydratedTranscript(state)) return;
+    const composerId = resolveComposerCacheKey(state);
+    if (!composerId || this.transcriptStorageHydrationInFlight.has(composerId)) return;
+    const now = Date.now();
+    const lastAttemptAt = this.transcriptStorageHydrationLastAttemptAt.get(composerId) ?? 0;
+    if (now - lastAttemptAt < STORAGE_HYDRATION_COOLDOWN_MS) return;
+
+    this.transcriptStorageHydrationLastAttemptAt.set(composerId, now);
+    this.transcriptStorageHydrationInFlight.add(composerId);
+    void (async () => {
+      try {
+        for (let attempt = 0; attempt < STORAGE_HYDRATION_ATTEMPTS; attempt++) {
+          const current = this.stateManager.getCurrentState();
+          if (resolveComposerCacheKey(current) !== composerId || current.messages.length > 0) return;
+
+          const stored = await loadStoredMessagesIfUnhydrated(
+            current,
+            id => this.storageHistory.loadComposerHistory(id),
+          );
+          if (stored) {
+            const merged = this.stateManager.mergeStoredHistory(stored.messages);
+            console.log(
+              `[relay] Auto-hydrated empty transcript from storage: composer=${composerId.slice(0, 8)} ` +
+              `loaded=${stored.loadedBubbles} added=${merged.addedCount}`,
+            );
+            return;
+          }
+          if (attempt + 1 < STORAGE_HYDRATION_ATTEMPTS) {
+            await new Promise(resolveRetry => setTimeout(resolveRetry, STORAGE_HYDRATION_RETRY_MS));
+          }
+        }
+      } catch (error) {
+        console.warn(
+          `[relay] Automatic transcript storage hydration failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      } finally {
+        this.transcriptStorageHydrationInFlight.delete(composerId);
+      }
+    })();
   }
 
   private async refreshStorageRelations(composerId: string, windowId: string): Promise<void> {

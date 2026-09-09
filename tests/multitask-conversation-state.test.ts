@@ -351,6 +351,24 @@ describe('Multitask and conversation state', () => {
     assert.equal(item._capabilities?.stop?.matchTitle, 'Probe worker');
   });
 
+  it('uses a clickable toolbar job as an open target when no transcript card is mounted', () => {
+    const state = extract(`
+      <div id="container" data-composer-id="composer-toolbar-open"></div>
+      <div id="composer-toolbar-section">
+        <div>1 subagent running</div>
+        <div class="composer-toolbar-background-job-item composer-toolbar-background-job-item-clickable">
+          <div class="composer-toolbar-background-job-item-text">Strict A B C rerun</div>
+          <div class="composer-toolbar-background-job-item-stop" data-click-ready="true">Stop</div>
+        </div>
+      </div>
+    `);
+
+    const item = state.subagents.items.find(entry => entry.title === 'Strict A B C rerun');
+    assert.ok(item);
+    assert.equal(item.openAvailable, true);
+    assert.ok(item._capabilities?.openSelectorPath);
+  });
+
   it('extracts card header Stop pill as stop capability', () => {
     const state = extract(`
       <div id="container" data-composer-id="composer-card-stop">

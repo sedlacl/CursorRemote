@@ -68,7 +68,13 @@ Cursor IDE  ←──CDP──→  Relay Server  ←──socket.io──→  Ph
 
 **Multi-window support**: All Cursor windows share a single CDP port (9222). Each window appears as a separate `page` target at `/json`. The bridge discovers all workbench page targets and exposes them as `CursorWindow[]`. Only one window is connected at a time; the user switches via the phone UI.
 
-**Workspace name extraction**: After connecting to a target, the bridge runs `Runtime.evaluate` to read `vscode.context.configuration().workspace.uri` — a stable internal API available in every Cursor/VS Code Electron renderer. The `uri.path` basename gives the project folder name, and `uri.authority` provides the remote qualifier (WSL, SSH, etc.). This is platform-independent and unaffected by the volatile `document.title`. The qualifier suffix (e.g. `[WSL: ubuntu-24.04]`) can be disabled by setting `WINDOW_TITLE_QUALIFIER=false` in `.env` for cleaner Telegram topic names. For non-connected windows (discovered via `/json` but not yet polled), the bridge falls back to parsing the CDP target title: strip ` - Cursor` suffix, split on ` - `, take the project segment.
+**Workspace name extraction**: After connecting to a target, the bridge runs `Runtime.evaluate`
+to read `vscode.context.configuration().workspace.uri` plus the window title. Named
+`.code-workspace` identity has priority over the first folder basename, so a multi-root
+workspace is not mislabeled as e.g. `mujProfil`. The extension uses `vscode.workspace.name`
+and the same shared resolver for Git snapshot keys. `uri.authority` provides the remote
+qualifier (WSL, SSH, etc.); `WINDOW_TITLE_QUALIFIER=false` disables it. For non-connected
+windows, the bridge parses the CDP title as fallback.
 
 **Lifecycle**:
 1. Fetch target list from `http://<CDP_URL>/json`

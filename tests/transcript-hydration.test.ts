@@ -3,7 +3,10 @@ import { describe, it } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { extractionFunction } from '../src/server/dom-extractor.js';
 import { StateManager } from '../src/server/state-manager.js';
-import { looksLikeUnhydratedTranscript } from '../src/server/transcript-hydration.js';
+import {
+  loadStoredMessagesIfUnhydrated,
+  looksLikeUnhydratedTranscript,
+} from '../src/server/transcript-hydration.js';
 import type { ChatElement, ChatTab, CursorState, HumanMessage } from '../src/server/types.js';
 
 const PARENT_ID = '52121ca2-4b2e-4f7d-b548-db84e8dec6d2';
@@ -167,6 +170,29 @@ describe('transcript hydration', () => {
     assert.equal(manager.getCurrentState().messages.length, 1);
     assert.equal(manager.getCurrentState().messages[0]?.id, 'p1');
     assert.equal(manager.getCurrentState().agentStatus, 'running_subagents');
+  });
+
+  it('loads stored messages for generating empty composer without in-memory cache', async () => {
+    const state = baseState({
+      activeComposerId: CHILD_ID,
+      chatTabs: [tab(CHILD_ID, 'Changelog: vrstvy parametru')],
+      messages: [],
+      agentStatus: 'generating',
+      _rawSignals: { transcriptRootEmpty: true, composerStatus: 'generating' },
+    });
+
+    let loadedComposerId = '';
+    const result = await loadStoredMessagesIfUnhydrated(state, async (composerId) => {
+      loadedComposerId = composerId;
+      return { messages: [human('stored-1', 'stored prompt')], loadedBubbles: 1 };
+    });
+
+    assert.equal(loadedComposerId, CHILD_ID);
+    assert.ok(result);
+    assert.equal(result!.loadedBubbles, 1);
+    assert.equal(result!.messages.length, 1);
+    assert.equal(result!.messages[0]?.id, 'stored-1');
+    assert.equal((result!.messages[0] as HumanMessage).text, 'stored prompt');
   });
 
   it('still publishes a truly empty idle composer that was never seen', () => {

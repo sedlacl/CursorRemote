@@ -6,6 +6,7 @@ import { EventEmitter } from 'events';
 import { buildEnvFromConfig } from './config-bridge.js';
 import { appendLogLine, type UnifiedOutputChannel } from './output-channel.js';
 import { updateStatusBar, type HealthData, type ServerState } from './status-bar.js';
+import { migrateLegacyUiReports } from './ui-report-migration.js';
 import type { GitLocalStatusSummary } from './git-status-display.js';
 
 const HEALTH_POLL_INTERVAL_MS = 5000;
@@ -162,6 +163,25 @@ export class ServerManager extends EventEmitter {
       this._reactingToFlag = false;
       vscode.window.showInformationMessage('Server is already running (owned by this window).');
       return;
+    }
+
+    // Migrate even when this window becomes an observer of an already running relay.
+    // A damaged legacy directory must never prevent the extension from starting.
+    const persistentDataDir = this.context.globalStorageUri.fsPath;
+    try {
+      if (!existsSync(persistentDataDir)) {
+        mkdirSync(persistentDataDir, { recursive: true });
+      }
+      const migratedReports = migrateLegacyUiReports(this.context.extensionPath, persistentDataDir);
+      if (migratedReports > 0) {
+        this.outputChannel.info(
+          `[${this.windowName}] Migrated ${migratedReports} UI report file(s) to persistent storage.`,
+        );
+      }
+    } catch (err) {
+      this.outputChannel.warn(
+        `[${this.windowName}] UI report migration failed: ${err instanceof Error ? err.message : err}`,
+      );
     }
 
     const { port, host } = this.getHealthUrl();

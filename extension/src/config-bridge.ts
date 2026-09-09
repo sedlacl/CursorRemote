@@ -25,6 +25,7 @@ export function buildEnvFromConfig(
     TELEGRAM_IMPL: config.get<string>('telegram.impl', 'grammy'),
     LICENSE_KEY: licenseKey ?? '',
     DATA_DIR: context.globalStorageUri.fsPath,
+    UI_REPORTS_DIR: join(context.globalStorageUri.fsPath, 'issues'),
     PACKAGE_ROOT: context.extensionPath,
     LOG_FORMAT: 'json',
     ...(clientSrcDir && existsSync(clientSrcDir) ? { CLIENT_SRC_DIR: clientSrcDir } : {}),

@@ -4,6 +4,18 @@ All notable changes to CursorRemote are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.12] - 2026-09-09
+
+### Changed
+- **Persistent UI reports**: reports captured by the installed extension now live in Cursor global storage and survive VSIX updates. The first 0.3.12 startup migrates missing reports from older extension directories.
+- **Compact Multitask changes**: the agent-authored `Review` / `Undo all` row stays hidden while a subagent is running, preserving transcript space on mobile; it returns when workers finish.
+
+### Fixed
+- **Empty live transcripts recover from storage**: when Cursor leaves a generating composer unhydrated after the relay starts, CursorRemote automatically loads that composer's stored history instead of showing an empty-chat message.
+- **Toolbar workers can be opened**: clickable Multitask toolbar jobs now expose the same Open action as mounted subagent cards.
+- **Cross-window approvals navigate reliably**: approval notifications switch to their source window and resolve the target composer again instead of falling back to an unrelated active tab.
+- **Named workspaces keep their identity**: `.code-workspace` names such as `usy_aflex_initdatag01-dev` take priority over the first folder basename in window labels and Git snapshot routing.
+
 ## [0.3.11] - 2026-08-18
 
 ### Fixed

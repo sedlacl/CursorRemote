@@ -9,6 +9,7 @@ import {
   UiReportError,
   UiReportService,
   buildUiReportAgentPrompt,
+  buildUiReportMarkdown,
   decodeWebScreenshotPng,
   sanitizeUiReportNote,
 } from '../src/server/ui-report.js';
@@ -143,14 +144,34 @@ describe('UI report service', () => {
     assert.deepEqual(decodeWebScreenshotPng('not!base64'), { error: 'web_screenshot_invalid' });
   });
 
+  it('normalizes Windows artifact paths in generated markdown', () => {
+    const markdown = buildUiReportMarkdown({
+      issueId: 'REPORT01',
+      diagnosticId: 'TESTID01',
+      date: '2026-09-09',
+      capturedAt: '2026-09-09T10:00:00.000Z',
+      artifactsAbs: 'C:\\Users\\test\\issues\\.artifacts\\REPORT01',
+      issueAbs: 'C:\\Users\\test\\issues\\report.md',
+      state: null,
+      warnings: [],
+      artifactFiles: ['state.json'],
+    });
+    assert.match(markdown, /C:\/Users\/test\/issues\/\.artifacts\/REPORT01\/state\.json/);
+    assert.doesNotMatch(markdown, /C:\\Users/);
+  });
+
   it('writes issue markdown and artifacts from client web DOM + screenshot + note', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ui-report-'));
     tempRoots.push(root);
+    let nowCalls = 0;
 
     const service = new UiReportService(createSnapshot(), {
       packageRoot: root,
       diagnosticId: 'TESTID01',
-      now: () => new Date('2026-08-06T10:00:00.000Z'),
+      now: () => {
+        nowCalls++;
+        return new Date('2026-08-06T10:00:00.000Z');
+      },
       idFactory: () => 'REPORT01',
     });
 
@@ -169,6 +190,7 @@ describe('UI report service', () => {
     assert.equal(result.issuePath, 'docs/issues/2026-08-06-ui-report-REPORT01.md');
     assert.equal(result.artifactsDir, 'docs/issues/.artifacts/REPORT01');
     assert.equal(result.warnings.length, 0);
+    assert.equal(nowCalls, 1);
 
     const issue = readFileSync(join(root, result.issuePath), 'utf8');
     assert.match(issue, /Issue ID: REPORT01/);
@@ -208,6 +230,27 @@ describe('UI report service', () => {
     });
     assert.match(prompt, /CursorRemote UI report/);
     assert.match(prompt, /REPORT01/);
+  });
+
+  it('writes outside packageRoot when a persistent issuesRoot is configured', async () => {
+    const packageRoot = mkdtempSync(join(tmpdir(), 'ui-report-package-'));
+    const issuesRoot = mkdtempSync(join(tmpdir(), 'ui-report-persistent-'));
+    tempRoots.push(packageRoot, issuesRoot);
+    const service = new UiReportService(createSnapshot(), {
+      packageRoot,
+      issuesRoot,
+      diagnosticId: 'TESTID01',
+      now: () => new Date('2026-09-09T10:00:00.000Z'),
+      idFactory: () => 'PERSIST1',
+    });
+    const result = await service.capture({
+      diagnosticId: 'TESTID01',
+      webDomHtml: '<html/>',
+      note: 'persistent report',
+    });
+    const expectedIssue = join(issuesRoot, '2026-09-09-ui-report-PERSIST1.md');
+    assert.equal(result.issuePath, expectedIssue.replace(/\\/g, '/'));
+    assert.match(readFileSync(expectedIssue, 'utf8'), /persistent report/);
   });
 
   it('rejects empty note / empty web DOM and concurrent captures', async () => {

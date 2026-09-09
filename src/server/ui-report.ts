@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
 import { mkdirSync, writeFileSync } from 'fs';
-import { join, relative, resolve } from 'path';
+import { join, relative, resolve, sep } from 'path';
 import { encodeCrockfordBase32 } from '../shared/diagnostic-id.js';
 import {
   DiagnosticSnapshotError,
@@ -12,7 +12,6 @@ import { DomExportError } from './dom-export.js';
 const DEFAULT_WEB_DOM_MAX_BYTES = 2 * 1024 * 1024;
 const DEFAULT_WEB_SCREENSHOT_MAX_BYTES = 2.5 * 1024 * 1024;
 const NOTE_MAX_CHARS = 2000;
-const ARTIFACTS_REL = join('docs', 'issues', '.artifacts');
 const ISSUES_REL = join('docs', 'issues');
 
 export interface UiReportClientInput {
@@ -47,6 +46,8 @@ export class UiReportError extends Error {
 
 export interface UiReportServiceOptions {
   packageRoot: string;
+  /** Persistent issue directory. Defaults to packageRoot/docs/issues for dev compatibility. */
+  issuesRoot?: string;
   diagnosticId: string;
   webDomMaxBytes?: number;
   webScreenshotMaxBytes?: number;
@@ -85,10 +86,14 @@ export function decodeWebScreenshotPng(base64: unknown): { buffer: Buffer } | { 
 }
 
 function dateStamp(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+function formatMarkdownPath(path: string): string {
+  return path.replace(/\\/g, '/');
 }
 
 function errorCode(error: unknown): string {
@@ -136,7 +141,11 @@ export function buildUiReportMarkdown(input: {
   const warningBlock = input.warnings.length > 0
     ? `\n## Capture warnings\n\n${input.warnings.map((w) => `- ${w}`).join('\n')}\n`
     : '';
-  const files = input.artifactFiles.map((f) => `- \`${join(input.artifactsAbs, f)}\``).join('\n');
+  const artifactsPath = formatMarkdownPath(input.artifactsAbs);
+  const issuePath = formatMarkdownPath(input.issueAbs);
+  const files = input.artifactFiles
+    .map((f) => `- \`${formatMarkdownPath(join(input.artifactsAbs, f))}\``)
+    .join('\n');
 
   return `# UI report ${input.issueId}
 
@@ -148,7 +157,7 @@ export function buildUiReportMarkdown(input: {
 - Client URL: ${input.clientUrl || '—'}
 - User-Agent: ${input.userAgent || '—'}
 - Viewport: ${input.viewport ? `${input.viewport.width}×${input.viewport.height}` : '—'}
-- Report: \`${input.artifactsAbs}\`
+- Report: \`${artifactsPath}\`
 - Area: web-ui | extractor | relay | other
 ${noteBlock}
 ## Symptom
@@ -167,7 +176,7 @@ Artifacts (gitignored raw files):
 
 ${files || '- (none)'}
 
-Issue markdown: \`${input.issueAbs}\`
+Issue markdown: \`${issuePath}\`
 ${warningBlock}
 ## Likely cause
 
@@ -199,6 +208,7 @@ export function buildUiReportAgentPrompt(input: {
 
 export class UiReportService {
   private readonly packageRoot: string;
+  private readonly issuesRoot: string;
   private readonly diagnosticId: string;
   private readonly webDomMaxBytes: number;
   private readonly webScreenshotMaxBytes: number;
@@ -211,6 +221,7 @@ export class UiReportService {
     options: UiReportServiceOptions,
   ) {
     this.packageRoot = resolve(options.packageRoot);
+    this.issuesRoot = resolve(options.issuesRoot ?? join(this.packageRoot, ISSUES_REL));
     this.diagnosticId = options.diagnosticId;
     this.webDomMaxBytes = options.webDomMaxBytes ?? DEFAULT_WEB_DOM_MAX_BYTES;
     this.webScreenshotMaxBytes = options.webScreenshotMaxBytes ?? DEFAULT_WEB_SCREENSHOT_MAX_BYTES;
@@ -240,17 +251,16 @@ export class UiReportService {
     this.running = true;
     const warnings: string[] = [];
     const artifactFiles: string[] = [];
-    const capturedAt = this.now().toISOString();
-    const date = dateStamp(this.now());
+    const capturedOn = this.now();
+    const capturedAt = capturedOn.toISOString();
+    const date = dateStamp(capturedOn);
     const issueId = this.idFactory();
-    const artifactsRel = join(ARTIFACTS_REL, issueId);
-    const artifactsAbs = join(this.packageRoot, artifactsRel);
-    const issueRel = join(ISSUES_REL, `${date}-ui-report-${issueId}.md`);
-    const issueAbs = join(this.packageRoot, issueRel);
+    const artifactsAbs = join(this.issuesRoot, '.artifacts', issueId);
+    const issueAbs = join(this.issuesRoot, `${date}-ui-report-${issueId}.md`);
 
     try {
       mkdirSync(artifactsAbs, { recursive: true });
-      mkdirSync(join(this.packageRoot, ISSUES_REL), { recursive: true });
+      mkdirSync(this.issuesRoot, { recursive: true });
 
       writeFileSync(join(artifactsAbs, 'web-dom.html'), html, 'utf8');
       artifactFiles.push('web-dom.html');
@@ -339,8 +349,8 @@ export class UiReportService {
       });
       writeFileSync(issueAbs, markdown, 'utf8');
 
-      const issuePath = relative(this.packageRoot, issueAbs).replace(/\\/g, '/');
-      const artifactsDir = relative(this.packageRoot, artifactsAbs).replace(/\\/g, '/');
+      const issuePath = this.formatResultPath(issueAbs);
+      const artifactsDir = this.formatResultPath(artifactsAbs);
       const agentPrompt = buildUiReportAgentPrompt({ issueId, issuePath, artifactsDir });
 
       return {
@@ -354,5 +364,11 @@ export class UiReportService {
     } finally {
       this.running = false;
     }
+  }
+
+  private formatResultPath(absolutePath: string): string {
+    const rel = relative(this.packageRoot, absolutePath);
+    const outsidePackage = rel === '..' || rel.startsWith(`..${sep}`);
+    return (outsidePackage ? absolutePath : rel).replace(/\\/g, '/');
   }
 }
