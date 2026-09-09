@@ -120,6 +120,12 @@ screenshot, and sanitized state, and writes:
 - `docs/issues/.artifacts/<issueId>/` (gitignored: `web-dom.html`, `web-screenshot.png`,
   `state.json`, `cursor-dom-*.html`, `cursor-screenshot.png`, `meta.json`)
 
+Both paths are relative to the **running relay's `packageRoot`** (`resolvePackageRoot()` in
+`src/server/relay.ts`), which is the repo only under `npm run dev`. When the relay runs from the
+installed extension, reports land in
+`%USERPROFILE%\.cursor\extensions\qjohn.cursor-remote-<version>-universal\docs\issues\` — outside
+the repo and invisible to `git status`. See `docs/issues/README.md` for the triage lookup.
+
 Response JSON includes `issueId`, `issuePath`, `artifactsDir`, `agentPrompt`, and `warnings`
 (partial capture failures do not abort the issue write; missing web screenshot becomes a warning).
 

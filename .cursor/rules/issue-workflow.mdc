@@ -44,7 +44,14 @@ issues v README neuváděj jako smazané.
 
 ### 1. Triage
 
-Načti všechny otevřené `*.md` v `docs/issues/` a roztřiď:
+Načti všechny otevřené `*.md` z **obou** míst (viz `docs/issues/README.md` → „Kde reporty hledat"):
+
+1. `docs/issues/` v repu — reporty z `npm run dev`.
+2. `%USERPROFILE%\.cursor\extensions\qjohn.cursor-remote-*\docs\issues\` — reporty z instalované
+   extension. Tady jich bývá většina a `git status` je neukáže; nikdy netvrď „otevřené: žádné"
+   jen podle repa.
+
+Roztřiď je:
 
 | Typ | Kritérium |
 | --- | --- |
