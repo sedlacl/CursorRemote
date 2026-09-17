@@ -4,8 +4,6 @@ import type { StateManager } from './state-manager.js';
 import type {
   OpenSourceControlRequest,
   OpenSourceControlResult,
-  CursorRestartRequest,
-  CursorRestartResult,
 } from '../shared/extension-bridge.js';
 import type { GitActionRequest, GitActionResult } from '../shared/git-scm.js';
 import type { ExtensionBridgeDiagnostics } from '../shared/diagnostics.js';
@@ -14,16 +12,12 @@ import {
   openSourceControlResultPath,
   gitActionRequestPath,
   gitActionResultPath,
-  cursorRestartRequestPath,
-  cursorRestartResultPath,
 } from '../shared/extension-bridge.js';
 
 const OPEN_SOURCE_CONTROL_TIMEOUT_MS = 5000;
 const OPEN_SOURCE_CONTROL_POLL_MS = 125;
 const GIT_ACTION_TIMEOUT_MS = 15000;
 const GIT_ACTION_POLL_MS = 125;
-const CURSOR_RESTART_TIMEOUT_MS = 12000;
-const CURSOR_RESTART_POLL_MS = 125;
 
 export class ExtensionFileBridge {
   private readonly dataDir: string;
@@ -73,34 +67,6 @@ export class ExtensionFileBridge {
     }
 
     throw new Error('Timed out waiting for extension to open Source Control');
-  }
-
-  async requestCursorRestart(requestId: string, remoteDebuggingPort: number): Promise<void> {
-    const request: CursorRestartRequest = {
-      requestId,
-      requestedAt: Date.now(),
-      remoteDebuggingPort,
-    };
-
-    writeFileSync(
-      cursorRestartRequestPath(this.dataDir),
-      JSON.stringify(request) + '\n',
-      'utf-8',
-    );
-
-    const deadline = Date.now() + CURSOR_RESTART_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      const result = this.readCursorRestartResult();
-      if (result?.requestId === requestId) {
-        if (result.ok) return;
-        throw new Error(result.error || 'Cursor restart with CDP failed');
-      }
-      await sleep(CURSOR_RESTART_POLL_MS);
-    }
-
-    throw new Error(
-      'Timed out waiting for the CursorRemote extension to restart Cursor. Start the relay from the installed extension, not only npm run dev.',
-    );
   }
 
   async requestGitAction(request: GitActionRequest): Promise<GitActionResult> {
@@ -154,19 +120,6 @@ export class ExtensionFileBridge {
       const raw = readFileSync(path, 'utf-8').trim();
       if (!raw) return null;
       return JSON.parse(raw) as OpenSourceControlResult;
-    } catch {
-      return null;
-    }
-  }
-
-  private readCursorRestartResult(): CursorRestartResult | null {
-    const path = cursorRestartResultPath(this.dataDir);
-    if (!existsSync(path)) return null;
-
-    try {
-      const raw = readFileSync(path, 'utf-8').trim();
-      if (!raw) return null;
-      return JSON.parse(raw) as CursorRestartResult;
     } catch {
       return null;
     }

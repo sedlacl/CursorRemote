@@ -42,6 +42,7 @@ import {
 import { UiReportError, UiReportService } from './ui-report.js';
 import { diagnosticIdsMatch } from '../shared/diagnostic-id.js';
 import { parseRemoteDebuggingPort } from '../shared/cdp-status.js';
+import { scheduleCursorCdpBreakawayRestart } from './cursor-cdp-breakaway-restart.js';
 import {
   resolveSubagentAction,
   sanitizePatchForClient,
@@ -318,9 +319,8 @@ export class Relay {
     if (port == null) {
       throw new Error(`Invalid CDP URL: ${this.config.cdpUrl}`);
     }
-    const requestId = randomBytes(8).toString('hex');
-    console.log(`[relay] Requesting Cursor restart with CDP port ${port}`);
-    await this.extensionBridge.requestCursorRestart(requestId, port);
+    console.log(`[relay] Scheduling breakaway Cursor restart with CDP port ${port}`);
+    await scheduleCursorCdpBreakawayRestart({ port, dataDir: this.config.dataDir });
     return { ok: true, port };
   }
 

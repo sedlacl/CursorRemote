@@ -68,26 +68,3 @@ export function gitActionResultPath(dataDir: string): string {
   return join(dataDir, 'git-action-result.json');
 }
 
-export interface CursorRestartRequest {
-  requestId: string;
-  requestedAt: number;
-  remoteDebuggingPort: number;
-}
-
-export interface CursorRestartResult {
-  requestId: string;
-  ok: boolean;
-  completedAt: number;
-  error?: string;
-}
-
-const CURSOR_RESTART_REQUEST_FILENAME = 'cursor-restart-request.json';
-const CURSOR_RESTART_RESULT_FILENAME = 'cursor-restart-result.json';
-
-export function cursorRestartRequestPath(dataDir: string): string {
-  return join(dataDir, CURSOR_RESTART_REQUEST_FILENAME);
-}
-
-export function cursorRestartResultPath(dataDir: string): string {
-  return join(dataDir, CURSOR_RESTART_RESULT_FILENAME);
-}

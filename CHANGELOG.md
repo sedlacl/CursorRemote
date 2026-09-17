@@ -4,6 +4,11 @@ All notable changes to CursorRemote are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.4] - 2026-09-17
+
+### Fixed
+- **CDP restart without stale request loops**: confirming restart from the web UI now schedules a breakaway `cmd`/`powershell` launcher from the relay instead of a file handshake through the extension. The launcher kills every `Cursor.exe` process and starts Cursor again with `--remote-debugging-port`, so a one-off request is not reprocessed on the next extension activation and Cursor is actually relaunched.
+
 ## [0.4.3] - 2026-09-17
 
 ### Fixed
