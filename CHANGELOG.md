@@ -4,6 +4,11 @@ All notable changes to CursorRemote are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.2] - 2026-09-17
+
+### Changed
+- **Installation docs point at the shipped VSIX**: the `cursor --install-extension` one-liner in the README and the setup guide names the current package instead of the long-obsolete `0.3.10` file, so a fresh install no longer fails on a missing filename. This is the first release of the 0.4.x line packaged for distribution; `0.4.1` was tagged but never published.
+
 ## [0.4.1] - 2026-09-17
 
 ### Fixed
