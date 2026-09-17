@@ -2,13 +2,11 @@ import { execSync } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { devPackageVersion, versionForFilename } from './version-utils.js';
+import { DEV_DISPLAY_NAME, DEV_PUBLISHER } from './marketplace-identity.js';
 
 const ROOT = resolve(process.cwd());
 const PKG_PATH = resolve(ROOT, 'package.json');
 const RELEASES_DIR = resolve(ROOT, 'releases');
-
-const DEV_PUBLISHER = 'cursor-remote-dev';
-const DEV_DISPLAY_NAME = 'QJohn CursorRemote (Dev)';
 
 function main(): void {
   const backup = readFileSync(PKG_PATH, 'utf-8');

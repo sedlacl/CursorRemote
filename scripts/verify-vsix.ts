@@ -1,6 +1,7 @@
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
-import { execSync } from 'child_process';
+import { MARKETPLACE_PUBLISHER } from './marketplace-identity.js';
+import { listZipEntries, readZipEntry, ZipReadError } from './zip-vsix.js';
 
 const DEV_ROOT = resolve(process.cwd());
 const PKG_PATH = resolve(DEV_ROOT, 'package.json');
@@ -30,32 +31,76 @@ const FORBIDDEN_PATTERNS = [
   '.cursor/',
 ];
 
-function main(): void {
-  const vsixArg = process.argv[2];
-  let vsixPath: string;
+export function parseVerifyArgs(argv: string[]): {
+  vsixArg?: string;
+  publisher?: string;
+  version?: string;
+  name?: string;
+} {
+  let vsixArg: string | undefined;
+  let publisher: string | undefined;
+  let version: string | undefined;
+  let name: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--publisher') {
+      publisher = argv[++i];
+    } else if (a === '--version') {
+      version = argv[++i];
+    } else if (a === '--name') {
+      name = argv[++i];
+    } else if (a.startsWith('-')) {
+      throw new Error(`Unknown argument: ${a}`);
+    } else if (!vsixArg) {
+      vsixArg = a;
+    }
+  }
+  return { vsixArg, publisher, version, name };
+}
 
+export function resolveExpectedIdentity(opts: {
+  pkg: { publisher?: string; name?: string; version?: string };
+  publisher?: string;
+  version?: string;
+  name?: string;
+}): { id: string; version: string } {
+  const name = opts.name ?? String(opts.pkg.name ?? 'cursor-remote');
+  const publisher = opts.publisher ?? MARKETPLACE_PUBLISHER;
+  const version = opts.version ?? String(opts.pkg.version ?? '');
+  return { id: `${publisher}.${name}`, version };
+}
+
+function main(): void {
+  const { vsixArg, publisher, version, name } = parseVerifyArgs(process.argv.slice(2));
+  const pkg = JSON.parse(readFileSync(PKG_PATH, 'utf-8')) as {
+    publisher?: string;
+    name?: string;
+    version?: string;
+  };
+
+  let vsixPath: string;
   if (vsixArg) {
     vsixPath = resolve(DEV_ROOT, vsixArg);
   } else {
-    const pkg = JSON.parse(readFileSync(PKG_PATH, 'utf-8'));
     vsixPath = resolve(DEV_ROOT, 'releases', `cursor-remote-${pkg.version}.vsix`);
   }
 
   console.log(`Verifying ${vsixPath}\n`);
 
-  let listing: string;
+  let files: string[];
   try {
-    // Single line: cmd.exe on Windows treats embedded newlines as command separators.
-    listing = execSync(
-      `python3 -c "import zipfile,sys;print('\\n'.join(zipfile.ZipFile(sys.argv[1]).namelist()))" ${JSON.stringify(vsixPath)}`,
-      { encoding: 'utf-8' },
-    );
-  } catch {
-    console.error(`✗ Could not read ${vsixPath}. Was it built?`);
+    files = listZipEntries(vsixPath);
+  } catch (err) {
+    const detail = err instanceof ZipReadError ? err.message : String(err);
+    console.error(`✗ Could not read VSIX archive ${vsixPath}: ${detail}`);
+    if (!existsSync(vsixPath)) {
+      console.error('  The file does not exist. Package it first, then re-run verification.');
+    } else {
+      console.error('  The file exists but could not be parsed as a ZIP/VSIX (not a missing-build issue).');
+    }
     process.exit(1);
   }
 
-  const files = listing.trim().split(/\r?\n/);
   let errors = 0;
 
   console.log('— Required files —');
@@ -98,26 +143,25 @@ function main(): void {
     }
   }
 
-  const pkg = JSON.parse(readFileSync(PKG_PATH, 'utf-8'));
+  const expected = resolveExpectedIdentity({ pkg, publisher, version, name });
   const innerPkgFile = files.find(f => f === 'extension/package.json');
   if (innerPkgFile) {
-    const innerPkg = execSync(
-      `python3 -c "import zipfile,sys,json;p=json.loads(zipfile.ZipFile(sys.argv[1]).read('extension/package.json'));print(p.get('publisher',''));print(p.get('name',''));print(p.get('version',''))" ${JSON.stringify(vsixPath)}`,
-      { encoding: 'utf-8' },
-    ).trim().split(/\r?\n/);
-    const [publisher, name, version] = innerPkg;
-    const expectedId = `${pkg.publisher}.${pkg.name}`;
-    const actualId = `${publisher}.${name}`;
-    if (actualId === expectedId) {
-      console.log(`\n✓ Extension ID match: ${actualId}`);
+    const innerPkg = JSON.parse(readZipEntry(vsixPath, 'extension/package.json').toString('utf-8')) as {
+      publisher?: string;
+      name?: string;
+      version?: string;
+    };
+    const actualId = `${innerPkg.publisher}.${innerPkg.name}`;
+    if (actualId === expected.id) {
+      console.log(`\n✓ Extension ID match: ${actualId} (marketplace identity, independent of local package.json publisher)`);
     } else {
-      console.error(`\n✗ Extension ID mismatch: VSIX has ${actualId}, repo expects ${expectedId}`);
+      console.error(`\n✗ Extension ID mismatch: VSIX has ${actualId}, expected marketplace id ${expected.id}`);
       errors++;
     }
-    if (version === pkg.version) {
-      console.log(`\n✓ Version match: ${pkg.version}`);
+    if (innerPkg.version === expected.version) {
+      console.log(`\n✓ Version match: ${expected.version}`);
     } else {
-      console.error(`\n✗ Version mismatch: VSIX has ${version}, repo has ${pkg.version}`);
+      console.error(`\n✗ Version mismatch: VSIX has ${innerPkg.version}, expected ${expected.version}`);
       errors++;
     }
   }
@@ -133,4 +177,7 @@ function main(): void {
   console.log('\n✓ VSIX verification passed.');
 }
 
-main();
+const isDirect = process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('verify-vsix.ts');
+if (isDirect) {
+  main();
+}

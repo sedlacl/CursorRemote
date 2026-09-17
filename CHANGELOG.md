@@ -4,6 +4,15 @@ All notable changes to CursorRemote are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.3] - 2026-09-17
+
+### Fixed
+- **Windows-safe VSIX verification**: the packaged extension is checked against the marketplace identity `qjohn.cursor-remote` instead of whatever publisher the local `package.json` currently holds, so verification no longer fails after the release script restores the dev identity. VSIX contents are read in Node rather than through `python3`, which on Windows is often only a Store alias stub and produced a misleading "Was it built?" error.
+- **Public publish sync works without rsync**: `publish:public` resolves the public repository through `USERPROFILE` or `CURSORREMOTE_PUBLIC_ROOT`, copies files in Node instead of calling `rsync`, and refuses to delete anything unless the target exists and is a git repository.
+
+### Security
+- **Open VSX token is no longer passed on the command line**: `ovsx publish` receives it through the `OVSX_PAT` environment variable instead of a `-p` argument, so the token cannot be read from the process list.
+
 ## [0.4.2] - 2026-09-17
 
 ### Changed

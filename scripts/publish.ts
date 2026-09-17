@@ -1,10 +1,13 @@
-import { readFileSync, existsSync, writeFileSync, unlinkSync } from 'fs';
+import {
+  readFileSync, existsSync, writeFileSync, unlinkSync, mkdirSync,
+  readdirSync, statSync, copyFileSync, rmSync, lstatSync,
+} from 'fs';
 import { execSync } from 'child_process';
-import { resolve } from 'path';
+import { resolve, join, relative, sep, dirname } from 'path';
 import { parseBaseSemver } from './version-utils.js';
+import { MARKETPLACE_PUBLISHER, MARKETPLACE_DISPLAY_NAME } from './marketplace-identity.js';
 
 const DEV_ROOT = resolve(process.cwd());
-const PUBLIC_ROOT = resolve(process.env.HOME ?? '~', 'Dev', 'CursorRemote');
 const PKG_PATH = resolve(DEV_ROOT, 'package.json');
 const CHANGELOG_PATH = resolve(DEV_ROOT, 'CHANGELOG.md');
 
@@ -26,19 +29,77 @@ const EXCLUDE = [
   '*.vsix',
 ];
 
+export function resolvePublicRoot(env: NodeJS.ProcessEnv = process.env, argv: string[] = process.argv.slice(2)): string {
+  const flagIdx = argv.indexOf('--public-root');
+  if (flagIdx !== -1 && argv[flagIdx + 1]) {
+    return resolve(argv[flagIdx + 1]);
+  }
+  if (env.CURSORREMOTE_PUBLIC_ROOT?.trim()) {
+    return resolve(env.CURSORREMOTE_PUBLIC_ROOT.trim());
+  }
+  const home = env.HOME?.trim() || env.USERPROFILE?.trim();
+  if (!home) {
+    throw new Error(
+      'Cannot resolve public repo path: HOME and USERPROFILE are empty. Set CURSORREMOTE_PUBLIC_ROOT.',
+    );
+  }
+  return resolve(home, 'Dev', 'CursorRemote');
+}
+
+export function toPosixRel(rel: string): string {
+  return rel.split(sep).join('/');
+}
+
+export function isExcludedPath(relPosix: string): boolean {
+  const n = relPosix.replace(/^\.\//, '');
+  if (!n) return false;
+  for (const pattern of EXCLUDE) {
+    if (pattern.startsWith('*.')) {
+      const suffix = pattern.slice(1);
+      if (n.endsWith(suffix) && !n.endsWith('/')) return true;
+      continue;
+    }
+    if (pattern.endsWith('/')) {
+      const dir = pattern.slice(0, -1);
+      if (n === dir || n.startsWith(dir + '/')) return true;
+      continue;
+    }
+    if (n === pattern || n.startsWith(pattern + '/')) return true;
+  }
+  return false;
+}
+
+export function assertPublicRepo(publicRoot: string, devRoot: string = DEV_ROOT): void {
+  if (!existsSync(publicRoot)) {
+    console.error(`✗ public repo not found at ${publicRoot}, set CURSORREMOTE_PUBLIC_ROOT`);
+    process.exit(1);
+  }
+  if (!existsSync(join(publicRoot, '.git'))) {
+    console.error(`✗ ${publicRoot} exists but is not a git repository. Refusing to sync or delete.`);
+    console.error('  Clone the public CursorRemote repo there, or set CURSORREMOTE_PUBLIC_ROOT to that clone.');
+    process.exit(1);
+  }
+  const pubReal = resolve(publicRoot);
+  const devReal = resolve(devRoot);
+  if (pubReal === devReal) {
+    console.error('✗ Public repo path is the same as the dev repo. Refusing to sync (would delete excluded files).');
+    process.exit(1);
+  }
+}
+
 function getVersion(): string {
   const pkg = JSON.parse(readFileSync(PKG_PATH, 'utf-8'));
   return parseBaseSemver(pkg.version as string).base;
 }
 
-function normalizePublicPackageJson(): void {
-  const pkgPath = resolve(PUBLIC_ROOT, 'package.json');
+function normalizePublicPackageJson(publicRoot: string): void {
+  const pkgPath = resolve(publicRoot, 'package.json');
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
-  pkg.publisher = 'qjohn';
-  pkg.displayName = 'QJohn CursorRemote';
+  pkg.publisher = MARKETPLACE_PUBLISHER;
+  pkg.displayName = MARKETPLACE_DISPLAY_NAME;
   pkg.version = parseBaseSemver(String(pkg.version)).base;
   writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
-  console.log('✓ Normalized public package.json for marketplace (publisher qjohn)');
+  console.log(`✓ Normalized public package.json for marketplace (publisher ${MARKETPLACE_PUBLISHER})`);
 }
 
 function getChangelogSection(version: string): string {
@@ -61,23 +122,100 @@ function devTreeClean(): boolean {
   return status.trim().length === 0;
 }
 
-function rsyncToPublic(): void {
-  const excludeFlags = EXCLUDE.map(e => `--exclude='${e}'`).join(' ');
-  const cmd = `rsync -av --delete ${excludeFlags} '${DEV_ROOT}/' '${PUBLIC_ROOT}/'`;
-  console.log(`\n$ ${cmd}\n`);
-  execSync(cmd, { stdio: 'inherit' });
+function walkFiles(root: string, out: string[] = [], base = root): string[] {
+  if (!existsSync(root)) return out;
+  for (const entry of readdirSync(root)) {
+    const full = join(root, entry);
+    const rel = toPosixRel(relative(base, full));
+    let st;
+    try {
+      st = lstatSync(full);
+    } catch {
+      continue;
+    }
+    if (st.isSymbolicLink()) continue;
+    if (st.isDirectory()) {
+      if (isExcludedPath(rel + '/')) continue;
+      walkFiles(full, out, base);
+    } else if (st.isFile()) {
+      if (!isExcludedPath(rel)) out.push(rel);
+    }
+  }
+  return out;
 }
 
-function publicDiffSummary(): string {
+function walkAllRel(root: string, out: string[] = [], base = root): string[] {
+  if (!existsSync(root)) return out;
+  for (const entry of readdirSync(root)) {
+    const full = join(root, entry);
+    const rel = toPosixRel(relative(base, full));
+    let st;
+    try {
+      st = lstatSync(full);
+    } catch {
+      continue;
+    }
+    if (st.isSymbolicLink()) continue;
+    if (rel === '.git' || rel.startsWith('.git/')) continue;
+    if (st.isDirectory()) {
+      out.push(rel);
+      walkAllRel(full, out, base);
+    } else {
+      out.push(rel);
+    }
+  }
+  return out;
+}
+
+function syncToPublic(publicRoot: string): void {
+  assertPublicRepo(publicRoot);
+  console.log(`\n$ node-sync ${DEV_ROOT} → ${publicRoot} (exclude ${EXCLUDE.length} patterns, delete extras except excluded/.git)\n`);
+
+  const srcFiles = walkFiles(DEV_ROOT);
+  for (const rel of srcFiles) {
+    const from = join(DEV_ROOT, rel);
+    const to = join(publicRoot, rel);
+    mkdirSync(dirname(to), { recursive: true });
+    copyFileSync(from, to);
+  }
+
+  const destRels = walkAllRel(publicRoot);
+  const srcSet = new Set(srcFiles);
+  const destDirs: string[] = [];
+  for (const rel of destRels) {
+    if (isExcludedPath(rel) || isExcludedPath(rel + '/')) continue;
+    const destPath = join(publicRoot, rel);
+    const st = statSync(destPath);
+    if (st.isDirectory()) {
+      destDirs.push(rel);
+      continue;
+    }
+    if (!srcSet.has(rel)) {
+      rmSync(destPath, { force: true });
+    }
+  }
+  destDirs.sort((a, b) => b.length - a.length);
+  for (const rel of destDirs) {
+    const destPath = join(publicRoot, rel);
+    try {
+      if (readdirSync(destPath).length === 0) rmSync(destPath, { recursive: true, force: true });
+    } catch {
+      /* gone */
+    }
+  }
+}
+
+function publicDiffSummary(publicRoot: string): string {
   return execSync('git diff --stat && echo "---" && git diff --cached --stat && echo "---" && git status --short', {
-    cwd: PUBLIC_ROOT,
+    cwd: publicRoot,
     encoding: 'utf-8',
+    shell: process.platform === 'win32' ? 'powershell.exe' : '/bin/sh',
   });
 }
 
-function publicHasChanges(): boolean {
-  execSync('git add -A', { cwd: PUBLIC_ROOT, stdio: 'inherit' });
-  const status = execSync('git status --porcelain', { cwd: PUBLIC_ROOT, encoding: 'utf-8' });
+function publicHasChanges(publicRoot: string): boolean {
+  execSync('git add -A', { cwd: publicRoot, stdio: 'inherit' });
+  const status = execSync('git status --porcelain', { cwd: publicRoot, encoding: 'utf-8' });
   return status.trim().length > 0;
 }
 
@@ -90,17 +228,17 @@ function ensureTag(version: string, cwd: string, label: string): void {
   }
 }
 
-function commitAndTag(version: string, body: string): void {
+function commitAndTag(version: string, body: string, publicRoot: string): void {
   const message = body ? `v${version}\n\n${body}` : `v${version}`;
-  const msgFile = resolve(PUBLIC_ROOT, '.git', 'COMMIT_MSG_TMP');
+  const msgFile = resolve(publicRoot, '.git', 'COMMIT_MSG_TMP');
   writeFileSync(msgFile, message, 'utf-8');
   try {
-    execSync(`git commit -F ${JSON.stringify(msgFile)}`, { cwd: PUBLIC_ROOT, stdio: 'inherit' });
+    execSync(`git commit -F ${JSON.stringify(msgFile)}`, { cwd: publicRoot, stdio: 'inherit' });
   } finally {
     try { unlinkSync(msgFile); } catch {}
   }
 
-  ensureTag(version, PUBLIC_ROOT, 'public');
+  ensureTag(version, publicRoot, 'public');
   ensureTag(version, DEV_ROOT, 'dev');
 }
 
@@ -111,34 +249,51 @@ function vsixPath(version: string): string {
   return resolve(RELEASES_DIR, `cursor-remote-${version}.vsix`);
 }
 
+function withMarketplacePackageJson<T>(fn: () => T): T {
+  const backup = readFileSync(PKG_PATH, 'utf-8');
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    writeFileSync(PKG_PATH, backup, 'utf-8');
+  };
+  const pkg = JSON.parse(backup) as Record<string, unknown>;
+  pkg.publisher = MARKETPLACE_PUBLISHER;
+  pkg.displayName = MARKETPLACE_DISPLAY_NAME;
+  writeFileSync(PKG_PATH, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
+
+  process.once('SIGINT', () => { restore(); process.exit(130); });
+  process.once('SIGTERM', () => { restore(); process.exit(143); });
+  try {
+    return fn();
+  } finally {
+    restore();
+  }
+}
+
 function packageVsix(version: string): string {
   const out = vsixPath(version);
-  const pkgPath = resolve(DEV_ROOT, 'package.json');
-  const backup = readFileSync(pkgPath, 'utf-8');
-  const pkg = JSON.parse(backup) as Record<string, unknown>;
-  pkg.publisher = 'qjohn';
-  pkg.displayName = 'QJohn CursorRemote';
-  pkg.version = version;
-  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
+  mkdirSync(RELEASES_DIR, { recursive: true });
 
   console.log('\n— Packaging .vsix —');
-  try {
+  return withMarketplacePackageJson(() => {
     execSync(`npx @vscode/vsce package --no-dependencies --out ${JSON.stringify(out)}`, {
       cwd: DEV_ROOT,
       stdio: 'inherit',
     });
     return out;
-  } finally {
-    writeFileSync(pkgPath, backup, 'utf-8');
-  }
+  });
 }
 
-function verifyVsix(vsix: string): void {
+function verifyVsix(vsix: string, version: string): void {
   console.log('\n— Verifying .vsix contents —');
-  execSync(`npx tsx scripts/verify-vsix.ts ${JSON.stringify(vsix)}`, {
-    cwd: DEV_ROOT,
-    stdio: 'inherit',
-  });
+  execSync(
+    `npx tsx scripts/verify-vsix.ts ${JSON.stringify(vsix)} --publisher ${MARKETPLACE_PUBLISHER} --version ${JSON.stringify(version)}`,
+    {
+      cwd: DEV_ROOT,
+      stdio: 'inherit',
+    },
+  );
 }
 
 function publishToOpenVsx(vsix: string): void {
@@ -154,22 +309,23 @@ function publishToOpenVsx(vsix: string): void {
   }
 
   console.log('\n— Publishing to Open VSX —');
-  execSync(`npx ovsx publish ${JSON.stringify(vsix)} -p ${token}`, {
+  execSync(`npx ovsx publish ${JSON.stringify(vsix)}`, {
     cwd: DEV_ROOT,
     stdio: 'inherit',
+    env: { ...process.env, OVSX_PAT: token },
   });
 
   console.log('✓ Published to Open VSX');
 }
 
-function createGitHubRelease(version: string, body: string, vsix: string): void {
+function createGitHubRelease(version: string, body: string, vsix: string, publicRoot: string): void {
   console.log('\n— Creating GitHub Release —');
-  const notesFile = resolve(PUBLIC_ROOT, '.git', 'RELEASE_NOTES_TMP');
+  const notesFile = resolve(publicRoot, '.git', 'RELEASE_NOTES_TMP');
   writeFileSync(notesFile, body, 'utf-8');
   try {
     execSync(
       `gh release create v${version} ${JSON.stringify(vsix)} --title "v${version}" --notes-file ${JSON.stringify(notesFile)} --latest`,
-      { cwd: PUBLIC_ROOT, stdio: 'inherit' },
+      { cwd: publicRoot, stdio: 'inherit' },
     );
   } finally {
     try { unlinkSync(notesFile); } catch {}
@@ -189,36 +345,53 @@ function main(): void {
   const doPush = args.includes('--push');
   const doOvsx = args.includes('--ovsx');
   const skipTests = args.includes('--skip-tests');
+  const packageOnly = args.includes('--package-only');
 
   const version = getVersion();
   const changelogBody = getChangelogSection(version);
 
-  console.log(`Publishing v${version} → ${PUBLIC_ROOT}`);
-
-  if (!skipTests) {
+  if (!skipTests && !packageOnly) {
     runRegressionTests();
-  } else {
+  } else if (skipTests) {
     console.warn('⚠ Skipping regression tests (--skip-tests)');
   }
+
+  if (packageOnly) {
+    const vsix = packageVsix(version);
+    verifyVsix(vsix, version);
+    console.log(`\n✓ Packaged and verified ${vsix} (no publish)`);
+    return;
+  }
+
+  let publicRoot: string;
+  try {
+    publicRoot = resolvePublicRoot();
+  } catch (err) {
+    console.error(`✗ ${err instanceof Error ? err.message : err}`);
+    process.exit(1);
+  }
+
+  console.log(`Publishing v${version} → ${publicRoot}`);
+  assertPublicRepo(publicRoot);
 
   if (!devTreeClean()) {
     console.warn('⚠ Dev repo has uncommitted changes. Proceeding anyway (syncing working tree).\n');
   }
 
-  rsyncToPublic();
-  normalizePublicPackageJson();
+  syncToPublic(publicRoot);
+  normalizePublicPackageJson(publicRoot);
 
-  if (!publicHasChanges()) {
+  if (!publicHasChanges(publicRoot)) {
     console.log('\nNo changes to publish. Public repo is up to date.');
   } else {
     console.log('\n— Public repo changes —');
-    console.log(publicDiffSummary());
+    console.log(publicDiffSummary(publicRoot));
 
     if (!doCommit) {
       console.log('Files synced. Review the public repo, then run again with --commit:');
       console.log(`  npm run publish:public -- --commit`);
       console.log(`\nOr commit manually:`);
-      console.log(`  cd ${PUBLIC_ROOT} && git add -A && git commit && git push`);
+      console.log(`  cd ${publicRoot} && git add -A && git commit && git push`);
       if (!doOvsx) return;
     } else {
       if (!changelogBody) {
@@ -230,17 +403,17 @@ function main(): void {
         process.exit(1);
       }
 
-      commitAndTag(version, changelogBody);
+      commitAndTag(version, changelogBody, publicRoot);
 
       if (doPush) {
-        execSync('git push && git push --tags', { cwd: PUBLIC_ROOT, stdio: 'inherit' });
+        execSync('git push && git push --tags', { cwd: publicRoot, stdio: 'inherit' });
         console.log('✓ Pushed public repo to origin');
         execSync('git push && git push --tags', { cwd: DEV_ROOT, stdio: 'inherit' });
         console.log('✓ Pushed dev repo to origin');
       } else {
         console.log(`\n✓ Committed v${version} to public repo`);
         console.log(`\nNext steps:`);
-        console.log(`  cd ${PUBLIC_ROOT} && git push && git push --tags`);
+        console.log(`  cd ${publicRoot} && git push && git push --tags`);
         console.log(`  cd ${DEV_ROOT} && git push --tags`);
       }
     }
@@ -248,14 +421,17 @@ function main(): void {
 
   if (doOvsx) {
     const vsix = packageVsix(version);
-    verifyVsix(vsix);
+    verifyVsix(vsix, version);
 
     publishToOpenVsx(vsix);
 
     if (changelogBody && doPush) {
-      createGitHubRelease(version, changelogBody, vsix);
+      createGitHubRelease(version, changelogBody, vsix, publicRoot);
     }
   }
 }
 
-main();
+const isDirect = process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('publish.ts');
+if (isDirect) {
+  main();
+}
