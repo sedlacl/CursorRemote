@@ -782,9 +782,15 @@ export function extractionFunction(
     ): { element: ChatElement; parsedAs: string } | null {
       const toolEl = toolRoot.querySelector('[data-tool-call-id]') || toolRoot;
       const toolCallId = toolEl.getAttribute('data-tool-call-id') || `tool-${flatIndex}`;
-      const toolStatus = (toolEl.getAttribute('data-tool-status') ||
+      const attrStatus = (toolEl.getAttribute('data-tool-status') ||
         toolRoot.getAttribute('data-tool-status') ||
         'completed') as 'loading' | 'completed';
+      // Cursor keeps data-tool-status="completed" on running subagent cards; shimmer/text-roll means still live.
+      const toolStatus = (
+        toolRoot.querySelector('[data-shimmer="true"], .ui-text-roll__item')
+          ? 'loading'
+          : attrStatus
+      ) as 'loading' | 'completed';
       if (patchRaw) {
         patchRaw.toolCallId = toolCallId;
         patchRaw.toolStatus = toolStatus;
@@ -1031,6 +1037,40 @@ export function extractionFunction(
           },
           parsedAs: 'todo_list',
         };
+      }
+
+      const subagentCard = toolRoot.querySelector(
+        '[data-subagent-task-card="true"], .subagent-task-card[data-chrome="card"]',
+      );
+      if (subagentCard) {
+        const modelEl =
+          subagentCard.querySelector('[data-subagent-task-model="true"]')
+          || subagentCard.querySelector('.task-subagent-model-hover-trigger');
+        const siblingTitle = (modelEl?.previousElementSibling?.textContent || '').replace(/\s+/g, ' ').trim();
+        const titled =
+          subagentCard.querySelector('.subagent-task-card-title[title]')
+          || subagentCard.querySelector('[data-subagent-task-card-header="true"] [title]')
+          || subagentCard.querySelector('.subagent-task-card-title');
+        const action = siblingTitle
+          || (titled?.getAttribute('title') || '').trim()
+          || (titled?.textContent || '').replace(/\s+/g, ' ').trim();
+        const details = (modelEl?.textContent || '').replace(/\s+/g, ' ').trim();
+        if (action || details) {
+          const cardActions = extractToolActions(toolRoot);
+          return {
+            element: {
+              type: 'tool' as const,
+              id: messageId,
+              flatIndex,
+              toolCallId,
+              status: toolStatus,
+              action: action || 'Tool',
+              details,
+              actions: cardActions.length > 0 ? cardActions : undefined,
+            },
+            parsedAs: 'tool:subagent-card',
+          };
+        }
       }
 
       const compactEl = toolRoot.querySelector('.composer-tool-former-message');
@@ -2003,9 +2043,12 @@ export function extractionFunction(
 
     const dedupeRepeatedText = (value: string): string => {
       const text = value.replace(/\s+/g, ' ').trim();
-      if (text.length >= 4 && text.length % 2 === 0) {
-        const half = text.slice(0, text.length / 2);
-        if (half === text.slice(half.length)) return half;
+      if (text.length < 4) return text;
+      // Cursor text-roll keeps 2–3 aria-hidden copies of the same phrase with no separator.
+      for (let n = Math.min(6, Math.floor(text.length / 2)); n >= 2; n--) {
+        if (text.length % n !== 0) continue;
+        const part = text.slice(0, text.length / n);
+        if (part.length >= 2 && part.repeat(n) === text) return part;
       }
       return text;
     };
@@ -2056,8 +2099,10 @@ export function extractionFunction(
         const title = readSubagentCardTitle(card);
         const model = readSubagentCardModel(card);
         const running = !!card.querySelector('.ui-subagent-status-indicator--running-loader');
+        const hasShimmer = !!card.querySelector('[data-shimmer="true"], .ui-text-roll__item');
         const statusText = dedupeRepeatedText(
-          card.querySelector('[data-shimmer="true"]')?.textContent
+          card.querySelector('.ui-text-roll__item[data-slot="current"]')?.textContent
+          || card.querySelector('[data-shimmer="true"]')?.textContent
           || card.querySelector('.ui-text-roll__item')?.textContent
           || '',
         );
@@ -2065,7 +2110,7 @@ export function extractionFunction(
         const cleanTitle = title.replace(/\s+/g, ' ').trim();
         const cleanModel = model?.replace(/\s+/g, ' ').trim();
         let status: CursorState['subagents']['items'][number]['status'] = 'unknown';
-        if (running) status = 'running';
+        if (running || hasShimmer) status = 'running';
         else if (/\b(error|failed)\b/i.test(statusText)) status = 'error';
         else if (/\b(waiting|blocked)\b/i.test(statusText)) status = 'waiting';
         else if (/\b(done|complete(?:d)?|finished)\b/i.test(statusText)) status = 'completed';
@@ -2095,9 +2140,11 @@ export function extractionFunction(
         ).replace(/\s+/g, ' ').trim();
         if (!title) continue;
         const stopEl = job.querySelector('.composer-toolbar-background-job-item-stop[data-click-ready="true"]');
-        const openEl = job.matches('.composer-toolbar-background-job-item-clickable')
-          ? job
-          : job.querySelector('.composer-toolbar-background-job-item-clickable');
+        const openEl =
+          job.querySelector('.composer-toolbar-background-job-item-text')
+          || (job.matches('.composer-toolbar-background-job-item-clickable')
+            ? job
+            : job.querySelector('.composer-toolbar-background-job-item-clickable'));
         addSubagent(title, undefined, 'running', 'Running', {
           openSelectorPath: openEl ? buildSelectorPath(openEl) : undefined,
           stop: stopEl ? { kind: 'toolbarStop', matchTitle: title } : undefined,
@@ -2729,8 +2776,14 @@ export function extractionFunction(
     // --- Model extraction ---
     // Skip plan-scoped model dropdowns (id starts with "plan-exec-model") — those
     // show the model for a specific plan, not the composer-level model.
+    // Current Cursor uses `.vscode-model-picker__trigger` (not `.ui-model-picker__trigger`).
     let modelEl: Element | null = null;
-    for (const sel of modelSelectors) {
+    const modelLookup = [
+      ...modelSelectors,
+      '.vscode-model-picker__trigger',
+      '.ui-model-picker__trigger',
+    ];
+    for (const sel of modelLookup) {
       try {
         const candidates = document.querySelectorAll(sel);
         for (const c of Array.from(candidates)) {
@@ -2749,27 +2802,43 @@ export function extractionFunction(
       // Cursor's model trigger may show an Effort badge ("High") as the first
       // span — skip effort/options tokens and prefer a longer model label.
       const effortBadgeRe = /^(low|medium|high|fast)$/i;
-      const spans = modelEl.querySelectorAll('span');
-      const candidates: string[] = [];
-      for (const s of Array.from(spans)) {
-        const t = (s.textContent || '').replace(/\s+/g, ' ').trim();
-        if (!t || t.includes('chevron') || t.length <= 1) continue;
-        if (effortBadgeRe.test(t)) continue;
-        candidates.push(t);
+      const stripEffort = (raw: string): string => {
+        const t = raw.replace(/\s+/g, ' ').trim();
+        return t.replace(/\s+(low|medium|high|fast)$/i, '').trim();
+      };
+      const markdownPara = modelEl.querySelector(
+        '.vscode-model-picker__trigger-markdown p, .ui-model-picker__trigger-markdown p, p.ui-markdown__paragraph',
+      );
+      if (markdownPara) {
+        const clone = markdownPara.cloneNode(true) as Element;
+        for (const s of Array.from(clone.querySelectorAll('span'))) {
+          const t = (s.textContent || '').replace(/\s+/g, ' ').trim();
+          if (effortBadgeRe.test(t)) s.remove();
+        }
+        modelName = stripEffort((clone.textContent || ''));
       }
-      // Prefer the longest non-effort span (model names are usually longer).
-      if (candidates.length > 0) {
-        modelName = candidates.reduce((best, cur) =>
-          cur.length > best.length ? cur : best
-        );
+      if (!modelName) {
+        const spans = modelEl.querySelectorAll('span');
+        const candidates: string[] = [];
+        for (const s of Array.from(spans)) {
+          const t = stripEffort((s.textContent || ''));
+          if (!t || t.includes('chevron') || t.length <= 1) continue;
+          if (effortBadgeRe.test(t)) continue;
+          candidates.push(t);
+        }
+        if (candidates.length > 0) {
+          modelName = candidates.reduce((best, cur) =>
+            cur.length > best.length ? cur : best
+          );
+        }
       }
       if (!modelName) {
         const aria = (modelEl.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
-        const ariaModel = aria.replace(/^(model|current model)\s*[:\-]?\s*/i, '').trim();
+        const ariaModel = stripEffort(aria.replace(/^(model|current model)\s*[:\-]?\s*/i, ''));
         if (ariaModel && !effortBadgeRe.test(ariaModel)) modelName = ariaModel;
       }
       if (!modelName) {
-        const title = (modelEl.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+        const title = stripEffort(modelEl.getAttribute('title') || '');
         if (title && !effortBadgeRe.test(title)) modelName = title;
       }
       modelId = modelEl.getAttribute('id') || '';
@@ -2971,6 +3040,9 @@ export function extractionFunction(
 
     return {
       connected: true,
+      cdpDisconnectReason: null,
+      cdpLastError: null,
+      cdpUrl: '',
       extractorStatus: 'ok',
       lastExtractionAt: null,
       consecutiveExtractionFailures: 0,

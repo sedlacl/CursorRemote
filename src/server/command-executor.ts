@@ -320,6 +320,7 @@ export const MODEL_MENU_LOOKUP_JS = `
     const byTestId = document.querySelector('[data-testid="model-picker-menu"]');
     if (byTestId) return byTestId;
     const triggers = document.querySelectorAll(
+      '.vscode-model-picker__trigger[aria-expanded="true"],' +
       '.ui-model-picker__trigger[aria-expanded="true"],' +
       '.composer-unified-dropdown-model[aria-expanded="true"],' +
       '.composer-unified-dropdown[aria-expanded="true"]'
@@ -887,8 +888,38 @@ export class CommandExecutor {
     });
   }
 
-  async openSubagent(commandId: string, selectorPath: string): Promise<CommandResult> {
-    return this.clickAction(commandId, selectorPath);
+  async openSubagent(
+    commandId: string,
+    capabilities: import('./types.js').SubagentItemCapabilities,
+  ): Promise<CommandResult> {
+    return this.withRetry(commandId, async (client) => {
+      const { buildSubagentOpenResolveEvaluateScript } = await import('./subagent-open-resolver.js');
+      const located = await client.evaluate(
+        buildSubagentOpenResolveEvaluateScript(capabilities),
+      ) as {
+        ok?: boolean;
+        code?: string;
+        usedNative?: boolean;
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
+      } | null;
+
+      if (!located?.ok) {
+        const code = located?.code;
+        throw new Error(code === 'ambiguous'
+          ? 'Multiple matching subagent open targets found'
+          : 'Subagent open target not found');
+      }
+      if (located.usedNative) {
+        if (!located.width || !located.height || located.x === undefined || located.y === undefined) {
+          throw new Error('Subagent open target is not clickable');
+        }
+        await client.clickAtCoords(located.x, located.y);
+      }
+      console.log(`[command-executor] Opened subagent: ${capabilities.matchTitle}`);
+    });
   }
 
   async stopSubagent(

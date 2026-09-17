@@ -83,7 +83,7 @@ describe('MODEL_MENU_LOOKUP_JS', () => {
       bySelector: new Map<string, MockElement[]>([
         ['[data-testid="model-picker-menu"]', []],
         [
-          '.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"],.composer-unified-dropdown[aria-expanded="true"]',
+          '.vscode-model-picker__trigger[aria-expanded="true"],.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"],.composer-unified-dropdown[aria-expanded="true"]',
           [openTrigger],
         ],
         ['[role="menu"][data-state="open"]', []],
@@ -100,7 +100,7 @@ describe('MODEL_MENU_LOOKUP_JS', () => {
       bySelector: new Map<string, MockElement[]>([
         ['[data-testid="model-picker-menu"]', []],
         [
-          '.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"],.composer-unified-dropdown[aria-expanded="true"]',
+          '.vscode-model-picker__trigger[aria-expanded="true"],.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"],.composer-unified-dropdown[aria-expanded="true"]',
           [],
         ],
         ['[role="menu"][data-state="open"]', [openMenu]],
@@ -116,7 +116,7 @@ describe('MODEL_MENU_LOOKUP_JS', () => {
       bySelector: new Map<string, MockElement[]>([
         ['[data-testid="model-picker-menu"]', []],
         [
-          '.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"],.composer-unified-dropdown[aria-expanded="true"]',
+          '.vscode-model-picker__trigger[aria-expanded="true"],.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"],.composer-unified-dropdown[aria-expanded="true"]',
           [],
         ],
         ['[role="menu"][data-state="open"]', []],
@@ -466,8 +466,9 @@ describe('selectors.json modelDropdown', () => {
     const raw = readFileSync(resolve('selectors.json'), 'utf-8');
     const parsed = JSON.parse(raw) as { modelDropdown?: { strategies?: string[] } };
     const strategies = parsed.modelDropdown?.strategies ?? [];
-    assert.ok(strategies.includes('.ui-model-picker__trigger'), 'new selector missing');
+    assert.ok(strategies.includes('.vscode-model-picker__trigger'), 'vscode trigger missing');
+    assert.ok(strategies.includes('.ui-model-picker__trigger'), 'ui trigger missing');
     assert.ok(strategies.includes('.composer-unified-dropdown-model'), 'legacy fallback missing');
-    assert.equal(strategies[0], '.ui-model-picker__trigger', 'new selector should be tried first');
+    assert.equal(strategies[0], '.vscode-model-picker__trigger', 'vscode selector should be tried first');
   });
 });

@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { CdpClient } from './cdp-client.js';
 import type { ServerConfig, CursorWindow } from './types.js';
+import { classifyCdpFailure, type CdpFailure } from '../shared/cdp-status.js';
 import { resolveWorkspaceIdentity, authorityToQualifier } from '../shared/workspace-identity.js';
 
 export { authorityToQualifier };
@@ -83,6 +84,7 @@ export class CDPBridge extends EventEmitter {
   private _activeTargetId = '';
   private _windows: CursorWindow[] = [];
   private _activeWorkspaceName: string | null = null;
+  private lastFailure: CdpFailure | null = null;
 
   constructor(config: ServerConfig) {
     super();
@@ -137,12 +139,14 @@ export class CDPBridge extends EventEmitter {
       });
 
       this.reconnectDelay = 1000;
+      this.lastFailure = null;
       console.log('[cdp-bridge] Connected successfully');
       this.emit('connected');
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[cdp-bridge] Connection failed: ${message}`);
-      this.emit('error', err);
+      const failure = classifyCdpFailure(err);
+      this.lastFailure = failure;
+      console.error(`[cdp-bridge] Connection failed (${failure.reason}): ${failure.message}`);
+      this.emit('error', err, failure);
       this.scheduleReconnect();
     }
   }
@@ -193,6 +197,10 @@ export class CDPBridge extends EventEmitter {
     return this.client !== null && this.client.isConnected();
   }
 
+  getLastFailure(): CdpFailure | null {
+    return this.lastFailure;
+  }
+
   private async fetchTargets(verbose = false): Promise<CDPTarget[]> {
     const url = `${this.config.cdpUrl}/json`;
     if (verbose) console.log(`[cdp-bridge] Discovering targets at ${url}`);
@@ -209,7 +217,15 @@ export class CDPBridge extends EventEmitter {
       throw new Error(`CDP target discovery failed: HTTP ${response.status}`);
     }
 
-    const targets: CDPTarget[] = await response.json() as CDPTarget[];
+    let targets: CDPTarget[];
+    try {
+      targets = await response.json() as CDPTarget[];
+    } catch {
+      throw new Error('CDP target discovery failed: invalid JSON');
+    }
+    if (!Array.isArray(targets)) {
+      throw new Error('CDP target discovery failed: invalid JSON');
+    }
     if (verbose) {
       const pages = targets.filter(t => t.type === 'page');
       const rest = targets.filter(t => t.type !== 'page');

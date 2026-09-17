@@ -45,17 +45,31 @@ export class CdpClient extends EventEmitter {
   private pending = new Map<number, PendingCall>();
   private _connected = false;
 
-  async connect(wsUrl: string): Promise<void> {
+  async connect(wsUrl: string, timeoutMs = 8000): Promise<void> {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(wsUrl);
+      let settled = false;
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try { this.ws?.terminate(); } catch { /* ignore */ }
+        reject(new Error(`CDP WebSocket connect timed out (${timeoutMs}ms)`));
+      }, timeoutMs);
 
       this.ws.on('open', () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         this._connected = true;
         resolve();
       });
 
       this.ws.on('error', (err) => {
         if (!this._connected) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
           reject(err);
         } else {
           console.error('[cdp-client] WebSocket error:', err.message);

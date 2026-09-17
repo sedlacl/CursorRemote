@@ -7,6 +7,9 @@ export interface HealthSnapshot {
   server?: ServerIdentity;
   gitStatus?: GitStatusInfo | null;
   connected?: boolean;
+  cdpUrl?: string;
+  cdpDisconnectReason?: string | null;
+  cdpLastError?: string | null;
   generation?: number;
   uptime?: number;
 }

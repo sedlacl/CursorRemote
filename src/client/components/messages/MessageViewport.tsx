@@ -8,6 +8,7 @@ import { useCommandClient } from '../../state/commandClient.js';
 import { useUiState } from '../../state/uiState.js';
 import { sanitizeHtml } from '../../utils/sanitizeHtml.js';
 import { getConnectionUiState } from '../../view-models/connectionState.js';
+import { requestRestartCursorWithCdp } from '../../state/restartCursorCdp.js';
 import { DiagnosticIdBadge } from '../shell/DiagnosticIdBadge.js';
 import { MessageList } from './messageTypes.js';
 
@@ -113,7 +114,11 @@ export function MessageViewport({ state, socketConnected, diagnosticId }: Messag
           Loading older messages...
         </div>
         {showTranscriptLoader ? null : displayMessages.length === 0 ? (
-          <EmptyState primary={connection.emptyPrimary} hint={connection.emptyHint} />
+          <EmptyState
+            primary={connection.emptyPrimary}
+            hint={connection.emptyHint}
+            showRestart={connection.showRestartCursorCdp}
+          />
         ) : (
           <MessageList key={historyScopeKey} messages={displayMessages} />
         )}
@@ -126,11 +131,51 @@ export function MessageViewport({ state, socketConnected, diagnosticId }: Messag
   );
 }
 
-function EmptyState({ primary, hint }: { primary: string; hint: string }) {
+function EmptyState({
+  primary,
+  hint,
+  showRestart,
+}: {
+  primary: string;
+  hint: string;
+  showRestart: boolean;
+}) {
+  const ui = useUiState();
+  const [pending, setPending] = useState(false);
+
+  const onRestart = async () => {
+    const confirmed = window.confirm(
+      'Restart Cursor with remote debugging enabled?\n\n'
+      + 'This closes your current IDE session (unsaved editors, agents, and terminals). '
+      + 'The web UI will reconnect after Cursor comes back.',
+    );
+    if (!confirmed) return;
+    setPending(true);
+    try {
+      await requestRestartCursorWithCdp();
+      ui.showToast('Cursor restart requested', 'success');
+    } catch (err) {
+      ui.showToast(err instanceof Error ? err.message : String(err), 'error');
+    } finally {
+      setPending(false);
+    }
+  };
+
   return (
     <div id="empty-state" className="empty-state">
       <p id="empty-state-primary">{primary}</p>
       <p id="empty-state-hint" className="hint" dangerouslySetInnerHTML={{ __html: sanitizeHtml(hint) }} />
+      {showRestart ? (
+        <button
+          type="button"
+          id="restart-cursor-cdp"
+          className="empty-state-restart"
+          disabled={pending}
+          onClick={() => void onRestart()}
+        >
+          {pending ? 'Restarting…' : 'Restart Cursor with CDP'}
+        </button>
+      ) : null}
     </div>
   );
 }

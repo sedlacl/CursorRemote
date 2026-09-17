@@ -27,6 +27,7 @@ export function sanitizeAssistantHtml(html: string): string {
     el.replaceWith(slot);
   });
   tmp.querySelectorAll('.ui-code-block').forEach((el) => el.remove());
+  tmp.querySelectorAll('.ui-dot-grid-loader').forEach((el) => el.remove());
 
   tmp.querySelectorAll<HTMLElement>('*').forEach((node) => {
     for (const attr of Array.from(node.attributes)) {

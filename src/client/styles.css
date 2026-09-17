@@ -304,6 +304,16 @@ header {
 
 .hint { font-size: 12px; }
 
+.empty-state-restart {
+  margin-top: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle, #3a3a4a);
+  background: var(--bg-surface);
+  color: var(--text-primary, #eee);
+  font-size: 13px;
+}
+
 /* --- Chat element base --- */
 
 .chat-el {
@@ -777,6 +787,23 @@ header {
 .assistant-content.markdown-body a {
   color: var(--accent-link);
   text-decoration: none;
+}
+
+/* Cursor subagent chips embed a 10px 3x3 loader SVG with no width/height. */
+.assistant-content .ui-dot-grid-loader,
+.assistant-content .ui-dot-grid-loader svg,
+.assistant-content .ui-dot-grid-loader__grid {
+  width: 10px;
+  height: 10px;
+  max-width: 10px;
+  max-height: 10px;
+  display: inline-block;
+  vertical-align: middle;
+  overflow: hidden;
+}
+.assistant-content svg:not([width]):not([height]) {
+  max-width: 16px;
+  max-height: 16px;
 }
 
 /* Shiki vars if Streamdown embeds inline code blocks in markdown HTML */

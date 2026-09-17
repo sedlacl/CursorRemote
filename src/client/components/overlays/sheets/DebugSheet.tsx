@@ -8,6 +8,7 @@ import { useUiState } from '../../../state/uiState.js';
 import { copyToClipboard } from '../../../utils/clipboard.js';
 import { promptReportNote } from '../../../utils/reportNoteDialog.js';
 import { captureWebClientScreenshot, waitForNextPaint } from '../../../utils/webScreenshot.js';
+import { requestRestartCursorWithCdp } from '../../../state/restartCursorCdp.js';
 import { buildStopButtonState } from '../../../view-models/stopState.js';
 
 function formatAgentStopDebugLabel(state: CursorState): string {
@@ -144,6 +145,19 @@ export function DebugSheet({
     ui.showToast('Server kill sent', 'success');
   }, [command, ui]);
 
+  const restartCursor = useCallback(async () => {
+    const confirmed = window.confirm(
+      'Restart Cursor with remote debugging enabled?\n\nThis closes your current IDE session.',
+    );
+    if (!confirmed) return;
+    try {
+      await requestRestartCursorWithCdp();
+      ui.showToast('Cursor restart requested', 'success');
+    } catch (err) {
+      ui.showToast(err instanceof Error ? err.message : String(err), 'error');
+    }
+  }, [ui]);
+
   const exportDom = useCallback(async (scope: DomExportScope) => {
     if (scope === 'document') {
       const confirmed = window.confirm(
@@ -220,6 +234,9 @@ export function DebugSheet({
           </button>
           <button id="debug-kill-server" type="button" className="debug-action-btn" onClick={() => void killServer()}>
             Kill server
+          </button>
+          <button id="debug-restart-cursor-cdp" type="button" className="debug-action-btn" onClick={() => void restartCursor()}>
+            Restart Cursor + CDP
           </button>
           <button type="button" className="debug-action-btn" onClick={() => void copyJson()}>
             Copy JSON

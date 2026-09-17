@@ -129,8 +129,10 @@ export class StatusTreeView implements vscode.TreeDataProvider<TreeItem> {
       );
       cdpItem.iconPath = new vscode.ThemeIcon(health.connected ? 'plug' : 'debug-disconnect');
       const activeWindow = health.windows?.find(w => w.id === health.activeWindowId);
-      if (activeWindow) {
+      if (health.connected && activeWindow) {
         cdpItem.description = activeWindow.title;
+      } else if (!health.connected) {
+        cdpItem.description = health.cdpDisconnectReason ?? health.cdpUrl ?? 'not connected';
       }
       items.push(cdpItem);
 

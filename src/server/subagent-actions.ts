@@ -54,7 +54,9 @@ export function resolveSubagentAction(
 export function validateOpenSubagent(action: ResolvedSubagentAction | null): string | null {
   if (!action) return 'Subagent not found';
   if (!action.item.openAvailable) return 'Open is not available for this subagent';
-  if (!action.capabilities.openSelectorPath) return 'Open target is unavailable';
+  if (!action.capabilities.matchTitle && !action.capabilities.openSelectorPath) {
+    return 'Open target is unavailable';
+  }
   return null;
 }
 

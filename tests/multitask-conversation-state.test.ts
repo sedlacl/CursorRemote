@@ -369,6 +369,21 @@ describe('Multitask and conversation state', () => {
     assert.ok(item._capabilities?.openSelectorPath);
   });
 
+  it('reads vscode-model-picker trigger label and strips the effort badge', () => {
+    const state = extract(`
+      <div id="container" data-composer-id="composer-model">
+        <button type="button" class="vscode-model-picker__trigger">
+          <span class="vscode-model-picker__trigger-text">
+            <div class="markdown-root vscode-model-picker__trigger-markdown">
+              <p class="ui-markdown__paragraph">Claude Opus 5 <span>Medium</span></p>
+            </div>
+          </span>
+        </button>
+      </div>
+    `);
+    assert.equal(state.model.current, 'Claude Opus 5');
+  });
+
   it('extracts card header Stop pill as stop capability', () => {
     const state = extract(`
       <div id="container" data-composer-id="composer-card-stop">
@@ -426,6 +441,74 @@ describe('Multitask and conversation state', () => {
     assert.equal(item.stopAvailable, true);
     assert.equal(item._capabilities?.stop?.kind, 'cardStop');
     assert.equal(item._capabilities?.stop?.toolCallId, 'call_new_card_1');
+  });
+
+  it('reads text-roll current slot and collapses n-fold shimmer copies', () => {
+    const fromSlot = extract(`
+      <div id="container" data-composer-id="composer-text-roll">
+        <div data-tool-call-id="call_roll_1">
+          <div data-subagent-task-card="true">
+            <div data-subagent-task-card-header="true" role="button">
+              <span>Fix subagent click-through + model display</span>
+              <span data-subagent-task-model="true">Subagent Medium</span>
+              <div data-shimmer="true">
+                <span aria-hidden="true">Extracting DOM evidence snippets</span>
+                <span class="ui-text-roll__item" data-slot="current">Extracting DOM evidence snippets</span>
+                <span aria-hidden="true">Extracting DOM evidence snippets</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="composer-toolbar-section"><div>1 subagent running</div></div>
+    `);
+    assert.equal(fromSlot.subagents.items[0]?.statusText, 'Extracting DOM evidence snippets');
+    assert.equal(fromSlot.subagents.items[0]?.status, 'running');
+
+    const fromDedupe = extract(`
+      <div id="container" data-composer-id="composer-text-roll-dedupe">
+        <div data-tool-call-id="call_roll_2">
+          <div data-subagent-task-card="true">
+            <div data-subagent-task-card-header="true" role="button">
+              <span>Start without CDP + restart Cursor with CDP</span>
+              <span data-subagent-task-model="true">Subagent Medium</span>
+              <div data-shimmer="true">Exploring CDP bootstrap flowExploring CDP bootstrap flowExploring CDP bootstrap flow</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="composer-toolbar-section"><div>1 subagent running</div></div>
+    `);
+    assert.equal(fromDedupe.subagents.items[0]?.statusText, 'Exploring CDP bootstrap flow');
+  });
+
+  it('parses subagent task cards as tool rows without concatenating title and model', () => {
+    const state = extract(`
+      <div id="container" data-composer-id="composer-tool-card">
+        <div class="virtualized-composer-messages-row" data-index="1" data-pair-index="0">
+          <div data-message-role="ai" data-message-kind="tool"
+               data-message-id="900e9fbd-cf42-4fcd-ac8b-1d55f6a5fd7a"
+               data-tool-call-id="toolu_01WwwyrEws58kUvH9up4QDjP"
+               data-tool-status="completed">
+            <div data-subagent-task-card="true">
+              <span>Fix subagent click-through + model display</span>
+              <span data-subagent-task-model="true">Subagent Medium</span>
+              <div data-shimmer="true">
+                <span class="ui-text-roll__item" data-slot="current">Extracting DOM evidence snippets</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `);
+    const tool = state.messages.find(message => message.type === 'tool');
+    assert.ok(tool);
+    assert.equal(tool?.type, 'tool');
+    if (tool?.type !== 'tool') return;
+    assert.equal(tool.action, 'Fix subagent click-through + model display');
+    assert.equal(tool.details, 'Subagent Medium');
+    assert.equal(tool.status, 'loading');
+    assert.equal(tool.action.includes('MediumExt'), false);
   });
 
   it('counts human image pills outside the readonly Lexical input', () => {

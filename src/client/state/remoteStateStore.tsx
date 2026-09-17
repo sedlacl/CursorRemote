@@ -3,6 +3,9 @@ import type { CursorState } from '../../server/types.js';
 
 export const defaultCursorState: CursorState = {
   connected: false,
+  cdpDisconnectReason: null,
+  cdpLastError: null,
+  cdpUrl: '',
   extractorStatus: 'idle',
   lastExtractionAt: null,
   consecutiveExtractionFailures: 0,

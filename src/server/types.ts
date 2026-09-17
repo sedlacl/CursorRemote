@@ -188,6 +188,12 @@ export interface ActiveConversationContext {
 
 export interface CursorState {
   connected: boolean;
+  /** Why CDP is down, when `connected` is false. */
+  cdpDisconnectReason?: 'unavailable' | 'wrong_port' | 'no_target' | 'connect_error' | null;
+  /** Last CDP connect error message (never contains secrets). */
+  cdpLastError?: string | null;
+  /** Configured CDP HTTP endpoint, e.g. http://127.0.0.1:9222. */
+  cdpUrl?: string;
   /** Health of DOM extraction independent from the CDP websocket connection. */
   extractorStatus: ExtractorStatus;
   /** Timestamp of the last successful extraction in ms since epoch. */
@@ -516,9 +522,11 @@ export interface MessageAttachment {
 
 export interface CommandPayload {
   commandId: string;
-  type: 'send_message' | 'approve' | 'reject' | 'approve_all' | 'switch_tab' | 'close_tab' | 'new_chat' | 'set_mode' | 'set_model' | 'click_action' | 'stop_agent' | 'open_subagent' | 'stop_subagent' | 'return_to_parent' | 'get_plan_full' | 'get_plan_model_options' | 'set_plan_model' | 'load_history' | 'open_source_control' | 'open_transcript_link' | 'kill_server' | 'navigate_to_approval';
+  type: 'send_message' | 'approve' | 'reject' | 'approve_all' | 'switch_tab' | 'close_tab' | 'new_chat' | 'set_mode' | 'set_model' | 'click_action' | 'stop_agent' | 'open_subagent' | 'stop_subagent' | 'return_to_parent' | 'get_plan_full' | 'get_plan_model_options' | 'set_plan_model' | 'load_history' | 'open_source_control' | 'open_transcript_link' | 'kill_server' | 'navigate_to_approval' | 'restart_cursor_with_cdp';
   /** Scroll steps in Cursor IDE when loading older chat history (load_history). */
   times?: number;
+  /** Required true for destructive commands such as restart_cursor_with_cdp. */
+  confirm?: boolean;
   text?: string;
   attachments?: MessageAttachment[];
   approvalId?: string;

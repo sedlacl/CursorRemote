@@ -1956,6 +1956,7 @@
         el.replaceWith(slot);
       });
     tmp.querySelectorAll('.ui-code-block').forEach((el) => el.remove());
+    tmp.querySelectorAll('.ui-dot-grid-loader').forEach((el) => el.remove());
     tmp.querySelectorAll('*').forEach(el => {
       for (const attr of Array.from(el.attributes)) {
         if (attr.name.startsWith('on') || attr.name === 'srcdoc') {

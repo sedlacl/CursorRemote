@@ -9,19 +9,23 @@ import type {
   GitStatusInfo,
   OpenSourceControlRequest,
   OpenSourceControlResult,
+  CursorRestartRequest,
+  CursorRestartResult,
 } from '../../src/shared/extension-bridge.js';
 import {
   openSourceControlRequestPath,
   openSourceControlResultPath,
   gitActionRequestPath,
   gitActionResultPath,
+  cursorRestartRequestPath,
+  cursorRestartResultPath,
 } from '../../src/shared/extension-bridge.js';
 import type { GitActionRequest, GitActionResult, GitScmSnapshot } from '../../src/shared/git-scm.js';
 import type { GitSnapshotReason } from '../../src/shared/diagnostics.js';
 import { snapshotSignature, type GitWindowSnapshotResult } from '../../src/shared/git-snapshot.js';
 import { basenameFromPath, resolveWorkspaceIdentity } from '../../src/shared/workspace-identity.js';
 import type { GitLocalStatusSummary } from './git-status-display.js';
-import type { HealthData } from './status-bar.js';
+import { restartCursorWithRemoteDebugging } from './cursor-cdp-restart.js';
 
 const GIT_PUSH_RETRY_ATTEMPTS = 3;
 const GIT_PUSH_RETRY_DELAY_MS = 500;
@@ -41,6 +45,7 @@ export class GitStateBridge implements vscode.Disposable {
   private bridgeDataDir: string;
   private lastRequestId = '';
   private lastGitActionRequestId = '';
+  private lastRestartRequestId = '';
   private lastPushedSignature = '';
   private lastSeenServerInstanceId: string | null = null;
   private lastGitRecoveryPushAt = 0;
@@ -87,6 +92,7 @@ export class GitStateBridge implements vscode.Disposable {
     this.serverManager.on('stateChanged', () => {
       void this.handleOpenSourceControlRequest();
       void this.handleGitActionRequest();
+      void this.handleCursorRestartRequest();
     });
     this.serverManager.on('started', () => {
       this.lastPushedSignature = '';
@@ -99,6 +105,7 @@ export class GitStateBridge implements vscode.Disposable {
     void this.snapshotProvider.start();
     void this.handleOpenSourceControlRequest();
     void this.handleGitActionRequest();
+    void this.handleCursorRestartRequest();
     this.setupBridgeWatcher();
   }
 
@@ -129,6 +136,9 @@ export class GitStateBridge implements vscode.Disposable {
         }
         if (filename === 'git-action-request.json') {
           void this.handleGitActionRequest();
+        }
+        if (filename === 'cursor-restart-request.json') {
+          void this.handleCursorRestartRequest();
         }
       });
     } catch (err) {
@@ -171,6 +181,7 @@ export class GitStateBridge implements vscode.Disposable {
     this.updateBridgeDataDir(health.extensionBridge?.dataDirPath);
     void this.handleOpenSourceControlRequest();
     void this.handleGitActionRequest();
+    void this.handleCursorRestartRequest();
 
     const instanceId = health.server?.instanceId;
     if (instanceId && this.lastSeenServerInstanceId !== instanceId) {
@@ -394,5 +405,57 @@ export class GitStateBridge implements vscode.Disposable {
       JSON.stringify(result) + '\n',
       'utf-8',
     );
+  }
+
+  private async handleCursorRestartRequest(): Promise<void> {
+    if (this.disposed) return;
+    const path = cursorRestartRequestPath(this.bridgeDataDir);
+    if (!existsSync(path)) return;
+
+    let request: CursorRestartRequest;
+    try {
+      request = JSON.parse(readFileSync(path, 'utf-8')) as CursorRestartRequest;
+    } catch {
+      return;
+    }
+
+    if (!request.requestId || request.requestId === this.lastRestartRequestId) return;
+    this.lastRestartRequestId = request.requestId;
+
+    const writeResult = (result: CursorRestartResult): void => {
+      writeFileSync(
+        cursorRestartResultPath(this.bridgeDataDir),
+        JSON.stringify(result) + '\n',
+        'utf-8',
+      );
+    };
+
+    try {
+      await restartCursorWithRemoteDebugging({
+        port: request.remoteDebuggingPort,
+        globalStorageFsPath: this.context.globalStorageUri.fsPath,
+        output: this.outputChannel,
+        appRoot: vscode.env.appRoot,
+      });
+      // Result must be on disk before quit — the extension host will not write after exit.
+      writeResult({
+        requestId: request.requestId,
+        ok: true,
+        completedAt: Date.now(),
+      });
+      this.outputChannel.info(
+        '[git-bridge] CDP relaunch waiter spawned; quitting all Cursor windows via workbench.action.quit',
+      );
+      setTimeout(() => {
+        void vscode.commands.executeCommand('workbench.action.quit');
+      }, 250);
+    } catch (err) {
+      writeResult({
+        requestId: request.requestId,
+        ok: false,
+        completedAt: Date.now(),
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }

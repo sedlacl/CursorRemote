@@ -4,6 +4,28 @@ All notable changes to CursorRemote are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.1] - 2026-09-17
+
+### Fixed
+- **Deferred CDP relaunch after a full quit**: restarting from the phone now writes `argv.json`, starts a detached waiter, and only then quits every Cursor window. The new process starts after the old PIDs exit, so `--remote-debugging-port` is no longer swallowed by Cursor's single-instance handoff — previously the restart just closed the editor without enabling the debugging port.
+- **Clean GUI spawn and named workspaces**: the relaunch strips `ELECTRON_RUN_AS_NODE` and other Electron/VS Code variables so Cursor starts as an application instead of a bare Node process, resolves `Cursor.exe` through `appRoot` when needed, and reopens a `.code-workspace` file instead of only its folder paths.
+- **Correct `argv.json` location**: the remote debugging port is written to Cursor's real user `argv.json` one level above global storage, so the setting survives later manual starts.
+
+## [0.4.0] - 2026-09-16
+
+### Added
+- **Restart Cursor with CDP from the phone UI**: when the debugging port is off, an authenticated user can confirm a restart from the connection banner or the Debug sheet. The extension writes `remote-debugging-port` into `argv.json` and relaunches Cursor with `--remote-debugging-port`, instead of killing the process blindly. Requires the same login as the rest of the API and an explicit confirmation, because it closes the running IDE session.
+
+### Changed
+- **Relay starts without CDP**: the HTTP server, login, and web UI now come up even when Cursor is not listening on the debugging port. CDP connect runs in the background with a timeout instead of blocking the rest of the startup, and the client reconnects on its own once the port appears.
+- **Clearer disconnected status**: health and the connection header report why CDP is down — unavailable, wrong port, no target, or connect error — instead of an indefinite "Connecting to Cursor IDE…" screen.
+
+### Fixed
+- **The real model is shown instead of Auto**: the extractor reads Cursor's current `.vscode-model-picker__trigger` (for example `Claude Opus 5`, including the effort suffix), so the remote UI no longer falls back to `Auto` for every chat.
+- **Running subagents can be opened again**: tapping a Multitask worker clicks that job's title in Cursor, resolved by name, rather than clicking the whole row next to its Stop control through a brittle CSS path.
+- **Subagent status and tool rows no longer glue copied DOM text**: the activity label is read from the current text-roll slot instead of all three `aria-hidden` copies, and tool rows show the task title next to the model instead of a truncated mash-up such as `…displaySubagent MediumExt`.
+- **Subagent chip loaders no longer fill the chat bubble**: decorative 3×3 loaders that Cursor embeds in assistant markdown links are stripped during sanitization, so messages stay readable on a phone instead of showing a grid of large black circles.
+
 ## [0.3.12] - 2026-09-09
 
 ### Changed

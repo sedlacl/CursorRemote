@@ -41,6 +41,7 @@ import {
 } from './diagnostic-snapshot.js';
 import { UiReportError, UiReportService } from './ui-report.js';
 import { diagnosticIdsMatch } from '../shared/diagnostic-id.js';
+import { parseRemoteDebuggingPort } from '../shared/cdp-status.js';
 import {
   resolveSubagentAction,
   sanitizePatchForClient,
@@ -285,13 +286,20 @@ export class Relay {
   }
 
   start(): Promise<void> {
-    return new Promise((resolve) => {
-      this.httpServer.listen(this.config.serverPort, this.config.serverHost, () => {
+    return new Promise((resolve, reject) => {
+      const onError = (err: Error) => {
+        this.httpServer.off('listening', onListening);
+        reject(err);
+      };
+      const onListening = () => {
+        this.httpServer.off('error', onError);
         console.log(
           `[relay] Server listening on http://${this.config.serverHost}:${this.config.serverPort}`
         );
         resolve();
-      });
+      };
+      this.httpServer.once('error', onError);
+      this.httpServer.listen(this.config.serverPort, this.config.serverHost, onListening);
     });
   }
 
@@ -303,6 +311,17 @@ export class Relay {
     return new Promise((resolve) => {
       this.httpServer.close(() => resolve());
     });
+  }
+
+  private async restartCursorWithCdp(): Promise<{ ok: true; port: number }> {
+    const port = parseRemoteDebuggingPort(this.config.cdpUrl);
+    if (port == null) {
+      throw new Error(`Invalid CDP URL: ${this.config.cdpUrl}`);
+    }
+    const requestId = randomBytes(8).toString('hex');
+    console.log(`[relay] Requesting Cursor restart with CDP port ${port}`);
+    await this.extensionBridge.requestCursorRestart(requestId, port);
+    return { ok: true, port };
   }
 
   private getClientIp(req: express.Request): string {
@@ -536,8 +555,11 @@ export class Relay {
         ok: true,
         authRequired: this.authEnabled,
         sessionValid: sessionOk,
-        connected: diagnostics.connected,
-        extractorStatus: this.stateManager.getCurrentState().extractorStatus,
+      connected: diagnostics.connected,
+      cdpUrl: diagnostics.cdpUrl,
+      cdpDisconnectReason: this.stateManager.getCurrentState().cdpDisconnectReason,
+      cdpLastError: this.stateManager.getCurrentState().cdpLastError,
+      extractorStatus: this.stateManager.getCurrentState().extractorStatus,
         lastExtractionAt: this.stateManager.getCurrentState().lastExtractionAt,
         consecutiveExtractionFailures: this.stateManager.getCurrentState().consecutiveExtractionFailures,
         lastExtractionError: this.stateManager.getCurrentState().lastExtractionError,
@@ -889,6 +911,25 @@ export class Relay {
         : `refresh-${Date.now()}`;
       const result = await this.gitScmService.refresh(requestId);
       res.status(result.ok ? 200 : 500).json(result);
+    });
+
+    this.app.post('/api/cursor/restart-with-cdp', async (req, res) => {
+      if (this.authEnabled && this.resolveHttpSession(req) === undefined) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+      if (req.body?.confirm !== true) {
+        res.status(400).json({ error: 'confirm_required' });
+        return;
+      }
+      try {
+        const result = await this.restartCursorWithCdp();
+        res.json(result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[relay] restart-with-cdp failed: ${message}`);
+        res.status(503).json({ error: message });
+      }
     });
 
     if (isSourceClient) {
@@ -1476,7 +1517,7 @@ export class Relay {
 
         const result = await this.commandExecutor.openSubagent(
           payload.commandId,
-          resolved!.capabilities.openSelectorPath!,
+          resolved!.capabilities,
         );
         if (result.ok) {
           await waitForFreshExtraction(this.stateManager, genBefore, 4000);
@@ -1679,6 +1720,40 @@ export class Relay {
         setTimeout(() => {
           void this.stop().finally(() => process.exit(0));
         }, 50);
+      });
+
+      socket.on('command:restart_cursor_with_cdp', async (payload: CommandPayload) => {
+        if (!payload.commandId) {
+          socket.emit('command:result', {
+            commandId: 'unknown',
+            ok: false,
+            error: 'Missing commandId',
+          } satisfies CommandResult);
+          return;
+        }
+        if (payload.confirm !== true) {
+          socket.emit('command:result', {
+            commandId: payload.commandId,
+            ok: false,
+            error: 'Confirmation required',
+          } satisfies CommandResult);
+          return;
+        }
+        console.log(`[relay] Command: restart_cursor_with_cdp from ${socket.id}`);
+        try {
+          const data = await this.restartCursorWithCdp();
+          socket.emit('command:result', {
+            commandId: payload.commandId,
+            ok: true,
+            data,
+          } satisfies CommandResult);
+        } catch (err) {
+          socket.emit('command:result', {
+            commandId: payload.commandId,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          } satisfies CommandResult);
+        }
       });
 
       socket.on('command:switch_window', async (payload: CommandPayload) => {

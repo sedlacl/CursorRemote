@@ -60,6 +60,9 @@ export function resolveGitSnapshotForActiveWindow(
 function emptyState(): CursorState {
   return {
     connected: false,
+    cdpDisconnectReason: null,
+    cdpLastError: null,
+    cdpUrl: '',
     extractorStatus: 'idle',
     lastExtractionAt: null,
     consecutiveExtractionFailures: 0,
@@ -450,12 +453,31 @@ export class StateManager extends EventEmitter {
       lastExtractionAt: null,
       consecutiveExtractionFailures: 0,
       lastExtractionError: null,
+      cdpDisconnectReason: connected ? null : this.currentState.cdpDisconnectReason,
+      cdpLastError: connected ? null : this.currentState.cdpLastError,
     };
     const patch = this.diff(this.currentState, nextState);
     if (!patch) return;
     this.currentState = nextState;
     this.emit('state:patch', patch);
     this.emit('connection:changed', connected);
+  }
+
+  onCdpStatus(update: {
+    cdpUrl: string;
+    reason: CursorState['cdpDisconnectReason'];
+    lastError: string | null;
+  }): void {
+    const nextState: CursorState = {
+      ...this.currentState,
+      cdpUrl: update.cdpUrl,
+      cdpDisconnectReason: update.reason,
+      cdpLastError: update.lastError,
+    };
+    const patch = this.diff(this.currentState, nextState);
+    if (!patch) return;
+    this.currentState = nextState;
+    this.emit('state:patch', patch);
   }
 
   updateWindows(windows: CursorWindow[], activeWindowId: string): void {
@@ -614,6 +636,21 @@ export class StateManager extends EventEmitter {
 
     if (prev.connected !== next.connected) {
       patch.connected = next.connected;
+      hasChange = true;
+    }
+
+    if (prev.cdpDisconnectReason !== next.cdpDisconnectReason) {
+      patch.cdpDisconnectReason = next.cdpDisconnectReason;
+      hasChange = true;
+    }
+
+    if (prev.cdpLastError !== next.cdpLastError) {
+      patch.cdpLastError = next.cdpLastError;
+      hasChange = true;
+    }
+
+    if (prev.cdpUrl !== next.cdpUrl) {
+      patch.cdpUrl = next.cdpUrl;
       hasChange = true;
     }
 

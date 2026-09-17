@@ -1,4 +1,4 @@
-import { createWriteStream, appendFileSync } from 'fs';
+import { createWriteStream, appendFileSync, mkdirSync } from 'fs';
 import { checkLicense } from './license.js';
 import { loadConfig, loadSelectors } from './config.js';
 import { CDPBridge } from './cdp-bridge.js';
@@ -14,7 +14,13 @@ import type { Transport } from './transports/types.js';
 import { TelegramTransport } from './transports/telegram/index.js';
 import { RawTelegramTransport } from './transports/telegram-raw/index.js';
 import { DomExportService } from './dom-export.js';
+import type { CdpFailure } from '../shared/cdp-status.js';
 
+try {
+  mkdirSync('./temp', { recursive: true });
+} catch {
+  /* ignore */
+}
 const logStream = createWriteStream('./temp/server.log', { flags: 'a' });
 const origLog = console.log;
 const origWarn = console.warn;
@@ -79,6 +85,7 @@ async function main(): Promise<void> {
   console.log();
 
   const stateManager = new StateManager(config.debounceMs);
+  stateManager.onCdpStatus({ cdpUrl: config.cdpUrl, reason: null, lastError: null });
   const commandExecutor = new CommandExecutor(selectors);
   const extensionBridge = new ExtensionFileBridge(config.dataDir, stateManager);
 
@@ -119,6 +126,7 @@ async function main(): Promise<void> {
 
   cdpBridge.on('connected', () => {
     const client = cdpBridge.getClient();
+    stateManager.onCdpStatus({ cdpUrl: config.cdpUrl, reason: null, lastError: null });
     stateManager.onConnectionChanged(true);
     stateManager.updateWindows(cdpBridge.windows, cdpBridge.activeTargetId);
     commandExecutor.setClient(client);
@@ -133,8 +141,14 @@ async function main(): Promise<void> {
     extractor.stop();
   });
 
-  cdpBridge.on('error', (err: Error) => {
-    console.error(`[main] CDP error: ${err.message}`);
+  cdpBridge.on('error', (_err: Error, failure?: CdpFailure) => {
+    const classified = failure ?? cdpBridge.getLastFailure();
+    console.error(`[main] CDP error: ${classified?.message ?? 'unknown'}`);
+    stateManager.onCdpStatus({
+      cdpUrl: config.cdpUrl,
+      reason: classified?.reason ?? 'connect_error',
+      lastError: classified?.message ?? 'CDP connection failed',
+    });
   });
 
   const transports: Transport[] = [];
@@ -155,8 +169,11 @@ async function main(): Promise<void> {
   );
   await relay.start();
 
-  console.log('[main] Connecting to Cursor IDE...');
-  await cdpBridge.connect();
+  windowMonitor.start();
+  refreshGlobalApprovals();
+
+  console.log('[main] Connecting to Cursor IDE (degraded mode until CDP is up)...');
+  void cdpBridge.connect();
 
   if (config.telegram.enabled && config.telegram.botToken) {
     const TgTransport = config.telegram.impl === 'raw' ? RawTelegramTransport : TelegramTransport;
@@ -184,9 +201,6 @@ async function main(): Promise<void> {
     });
     transports.push(telegram);
   }
-
-  windowMonitor.start();
-  refreshGlobalApprovals();
 
   const shutdown = async () => {
     console.log('\n[main] Shutting down...');

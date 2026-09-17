@@ -17,6 +17,9 @@ export interface HealthData {
   pendingApprovalCount: number;
   generation: number;
   gitStatus?: { available: boolean; changedCount: number } | null;
+  cdpUrl?: string;
+  cdpDisconnectReason?: string | null;
+  cdpLastError?: string | null;
   server?: ServerIdentity;
   extensionBridge?: { dataDirName: string; dataDirPath: string };
 }

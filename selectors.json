@@ -78,6 +78,7 @@
   },
   "modelDropdown": {
     "strategies": [
+      ".vscode-model-picker__trigger",
       ".ui-model-picker__trigger",
       ".ui-model-picker__trigger[aria-haspopup='menu']",
       ".composer-unified-dropdown-model"
