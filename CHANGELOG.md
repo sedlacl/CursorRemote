@@ -4,6 +4,15 @@ All notable changes to CursorRemote are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.5] - 2026-09-18
+
+### Fixed
+- **Restart no longer leaves a console window on the desktop**: the CDP relaunch helper now runs as a plain Node script started with the relay's own runtime and no console allocated, instead of a minimized shell window. That window used to survive the whole relaunch, and closing it took the freshly started Cursor down with it.
+- **Restart finds Cursor regardless of packaging**: the helper enumerates running processes and matches them by name and by the resolved executable path, so AppImage installs — whose process name is the image file — are detected too. Previously only a process literally named `cursor` was matched, and anything else looked already stopped, so Cursor was relaunched while the old instance still held the debugging port.
+
+### Changed
+- **One cross-platform relaunch helper instead of per-platform shell scripts**: the generated PowerShell, VBScript, and `sh` launchers are replaced by a single JavaScript helper used on Windows, macOS, and Linux. It terminates Cursor by process ID and always excludes its own, so it can no longer take itself down with the IDE, and it exits as soon as the new instance is started.
+
 ## [0.4.4] - 2026-09-17
 
 ### Fixed

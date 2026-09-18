@@ -1,21 +1,17 @@
 import { spawn } from 'child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import {
-  assertBreakawaySpawnDoesNotUseCursorImage,
-  buildUnixBreakawaySpawn,
-  buildUnixRelaunchScriptBody,
-  buildWindowsBreakawaySpawn,
-  buildWindowsRelaunchScriptBody,
+  buildLauncherSpawnPlan,
+  buildRelaunchLauncherSource,
   ensureArgvRemoteDebuggingPort,
   resolveArgvJsonPath,
   resolveCursorExecutableForRelay,
   type CursorCdpRelaunchConfig,
 } from '../shared/cursor-cdp-breakaway-restart.js';
 
-const RELAUNCH_SCRIPT_NAME = 'cursor-cdp-breakaway-relaunch.ps1';
-const RELAUNCH_SCRIPT_UNIX_NAME = 'cursor-cdp-breakaway-relaunch.sh';
-const RELAUNCH_CONFIG_NAME = 'cursor-cdp-breakaway-relaunch.json';
+const LAUNCHER_NAME = 'cursor-cdp-relaunch.cjs';
+const RELAUNCH_CONFIG_NAME = 'cursor-cdp-relaunch.json';
 const RELAUNCH_LOG_NAME = 'cursor-cdp-relaunch.log';
 
 export async function scheduleCursorCdpBreakawayRestart(input: {
@@ -25,6 +21,11 @@ export async function scheduleCursorCdpBreakawayRestart(input: {
   const { port, dataDir } = input;
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error(`Invalid remote debugging port: ${port}`);
+  }
+
+  const platform = process.platform;
+  if (platform !== 'win32' && platform !== 'darwin' && platform !== 'linux') {
+    throw new Error(`Restart with CDP is not supported on ${platform}`);
   }
 
   if (!existsSync(dataDir)) {
@@ -58,6 +59,7 @@ export async function scheduleCursorCdpBreakawayRestart(input: {
 
   const logPath = join(dataDir, RELAUNCH_LOG_NAME);
   const configPath = join(dataDir, RELAUNCH_CONFIG_NAME);
+  const launcherPath = join(dataDir, LAUNCHER_NAME);
   const config: CursorCdpRelaunchConfig = {
     exe,
     port,
@@ -65,31 +67,18 @@ export async function scheduleCursorCdpBreakawayRestart(input: {
     graceMs: 2000,
     timeoutMs: 45000,
   };
+  writeFileSync(launcherPath, buildRelaunchLauncherSource(), 'utf-8');
   writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
-  writeFileSync(logPath, `${new Date().toISOString()} scheduled breakaway relaunch\n`, 'utf-8');
+  writeFileSync(logPath, `${new Date().toISOString()} scheduled relaunch\n`, 'utf-8');
 
-  const platform = process.platform;
-  let plan;
-  if (platform === 'win32') {
-    const scriptPath = join(dataDir, RELAUNCH_SCRIPT_NAME);
-    writeFileSync(scriptPath, buildWindowsRelaunchScriptBody(), 'utf-8');
-    plan = buildWindowsBreakawaySpawn(scriptPath, configPath, process.env.ComSpec ?? 'cmd.exe');
-  } else if (platform === 'darwin' || platform === 'linux') {
-    const scriptPath = join(dataDir, RELAUNCH_SCRIPT_UNIX_NAME);
-    writeFileSync(scriptPath, buildUnixRelaunchScriptBody(config, platform), 'utf-8');
-    chmodSync(scriptPath, 0o755);
-    plan = buildUnixBreakawaySpawn(scriptPath);
-  } else {
-    throw new Error(`Restart with CDP is not supported on ${platform}`);
-  }
-
-  assertBreakawaySpawnDoesNotUseCursorImage(plan);
+  const plan = buildLauncherSpawnPlan(process.execPath, launcherPath, configPath);
 
   await new Promise<void>((resolve, reject) => {
     const child = spawn(plan.executable, plan.args, {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     });
     child.once('error', reject);
     child.once('spawn', () => {
@@ -98,5 +87,5 @@ export async function scheduleCursorCdpBreakawayRestart(input: {
     });
   });
 
-  console.log(`[relay] Breakaway CDP relaunch scheduled (log=${logPath})`);
+  console.log(`[relay] CDP relaunch launcher started (log=${logPath})`);
 }
