@@ -255,6 +255,15 @@ export interface CursorState {
 
 export type ChatTabWorkStatus = 'running' | 'completed' | 'idle';
 
+/**
+ * Which IDE agent a chat tab belongs to.
+ *
+ * `cursor` is the Cursor composer (workbench DOM); `claude-code` is the
+ * `anthropic.claude-code` webview panel. Declared here rather than in the host
+ * layer so state types do not depend on the adapter implementations.
+ */
+export type ChatHostId = 'cursor' | 'claude-code';
+
 export interface ChatTab {
   composerId: string;
   title: string;
@@ -265,6 +274,11 @@ export interface ChatTab {
   source: 'open' | 'sidebar';
   /** Agent work state mirrored from Cursor sidebar / composer DOM. */
   workStatus: ChatTabWorkStatus;
+  /**
+   * Which IDE agent owns this tab. Absent means `cursor` — every tab extracted
+   * before the Claude Code adapter existed is a Cursor composer tab.
+   */
+  host?: ChatHostId;
 }
 
 export interface ModeInfo {

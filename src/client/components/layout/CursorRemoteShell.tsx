@@ -10,6 +10,7 @@ import { BottomSheetHost } from '../overlays/BottomSheetHost.js';
 import { PlanModal } from '../overlays/PlanModal.js';
 import { ToastHost } from '../overlays/ToastHost.js';
 import { ChatTabBar } from '../shell/ChatTabBar.js';
+import { ClaudeRunningTasks } from '../shell/ClaudeRunningTasks.js';
 import { ComposerInput } from '../shell/ComposerInput.js';
 import { ComposerQueueStrip } from '../shell/ComposerQueueStrip.js';
 import { HeaderBar } from '../shell/HeaderBar.js';
@@ -55,6 +56,7 @@ export function CursorRemoteShell({
       />
       <ApprovalBar state={state} />
       <QuestionnaireBar state={state} />
+      <ClaudeRunningTasks state={state} />
       <ComposerInput state={state} setSendPending={setSendPending} />
       <BottomSheetHost
         state={state}

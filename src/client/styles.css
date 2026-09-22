@@ -21,6 +21,9 @@
   --accent-yellow: #f1b467;
   --accent-blue: #3794ff;
   --accent-purple: #b180d7;
+  /* Claude Code host accent — distinguishes its tabs from Cursor's in the
+     shared tab bar and tints the header while such a tab is active. */
+  --accent-claude: #d97757;
   --accent-link: #81a1c1;
 
   --border-color: rgba(228, 228, 228, 0.08);
@@ -2432,6 +2435,92 @@ header {
 .tab-chip.active {
   background: var(--bg-hover);
   border-color: rgba(55, 148, 255, 0.35);
+}
+
+.tab-chip.host-claude-code {
+  border-color: rgba(217, 119, 87, 0.38);
+}
+
+.tab-chip.host-claude-code.active {
+  border-color: rgba(217, 119, 87, 0.75);
+  background: rgba(217, 119, 87, 0.12);
+}
+
+.tab-chip.host-claude-code .tab-status {
+  background: var(--accent-claude);
+}
+
+.tab-host-badge {
+  flex-shrink: 0;
+  margin-right: 5px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent-claude);
+  background: rgba(217, 119, 87, 0.16);
+}
+
+/* Header tone while a Claude Code tab is active — no new layout, just accent. */
+#header.header--claude {
+  background: linear-gradient(
+    to bottom,
+    rgba(217, 119, 87, 0.10),
+    var(--bg-secondary)
+  );
+  border-bottom-color: rgba(217, 119, 87, 0.32);
+}
+
+/* Running tasks subview — Claude tabs only (see ClaudeRunningTasks). */
+.claude-running-tasks {
+  flex-shrink: 0;
+  padding: 6px 12px 8px;
+  background: var(--bg-secondary);
+  border-top: 1px solid rgba(217, 119, 87, 0.22);
+}
+
+.claude-running-tasks-title {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent-claude);
+}
+
+.claude-running-tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.claude-running-task {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.claude-running-task-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+}
+
+.claude-running-task-status {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-tertiary);
 }
 
 .tab-item {

@@ -17,7 +17,9 @@ export function ChatTabBar({ tabs }: ChatTabBarProps) {
   const renderTab = (tab: ChatTab) => (
     <div
       key={`${tab.source}:${tab.composerId}:${tab.title}`}
-      className={`tab-chip ${tab.isActive ? 'active' : ''}`}
+      // Claude sessions sit in the same bar as Cursor chats, so the chip carries
+      // the host as a modifier — the tint is the only thing telling them apart.
+      className={`tab-chip host-${tab.host ?? 'cursor'} ${tab.isActive ? 'active' : ''}`}
     >
       <button
         type="button"
@@ -31,6 +33,9 @@ export function ChatTabBar({ tabs }: ChatTabBarProps) {
         })}
       >
         <span className={`tab-status ${tab.workStatus}`} aria-hidden="true" />
+        {tab.host === 'claude-code' && (
+          <span className="tab-host-badge" aria-label="Claude Code session">CC</span>
+        )}
         <span className="tab-title">{tab.title || 'Chat'}</span>
       </button>
       <button

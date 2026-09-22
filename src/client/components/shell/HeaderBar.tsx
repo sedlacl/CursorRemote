@@ -117,8 +117,12 @@ export function HeaderBar({
     : '';
   const approvalCountLabel = globalApprovals.length > 1 ? ` (${globalApprovals.length})` : '';
 
+  // Tinted header when the active chat lives in the Claude Code panel — same
+  // layout, different tone, so it is obvious which agent a command will reach.
+  const activeHost = state.chatTabs.find(tab => tab.isActive)?.host ?? 'cursor';
+
   return (
-    <header id="header">
+    <header id="header" className={activeHost === 'claude-code' ? 'header--claude' : undefined}>
       <div className="header-left">
         <span id="connection-dot" className={`dot ${connection.status}`} />
         <span id="connection-text">{connection.label}</span>

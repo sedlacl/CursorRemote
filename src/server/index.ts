@@ -15,6 +15,11 @@ import { TelegramTransport } from './transports/telegram/index.js';
 import { RawTelegramTransport } from './transports/telegram-raw/index.js';
 import { DomExportService } from './dom-export.js';
 import type { CdpFailure } from '../shared/cdp-status.js';
+import type { BackgroundTask, ChatTab } from './types.js';
+import { ChatHostRegistry } from './hosts/chat-host-registry.js';
+import { CursorHost } from './hosts/cursor-host.js';
+import { ClaudeCodeHost } from './hosts/claude-code-host.js';
+import { detectClaudeCodeVersion } from './hosts/claude-version.js';
 
 try {
   mkdirSync('./temp', { recursive: true });
@@ -94,13 +99,60 @@ async function main(): Promise<void> {
   const extractor = new DOMExtractor(
     selectors,
     (state, errorMessage) => {
-      if (state) stateManager.onExtraction(state);
-      else stateManager.onExtractionFailure(errorMessage ?? 'Extraction failed');
+      if (state) {
+        // Claude tabs and background tasks ride the existing extractor tick, so
+        // they reach the client through the same `state:patch` as everything
+        // else — no second poller, and `/tasks` is never opened.
+        state.chatTabs = mergeClaudeTabs(state.chatTabs);
+        state.backgroundTasks = mergeClaudeBackgroundTasks(state.backgroundTasks);
+        stateManager.onExtraction(state);
+      } else {
+        stateManager.onExtractionFailure(errorMessage ?? 'Extraction failed');
+      }
     },
     () => cdpBridge.windows.find(w => w.id === cdpBridge.activeTargetId)?.title ?? ''
   );
 
   const windowMonitor = new WindowMonitor(cdpBridge, stateManager, extractor, config, selectors);
+
+  // Adapter seam: the relay routes chat commands through a host, never through
+  // the Cursor executor directly. Cursor is always registered; Claude Code only
+  // contributes tabs once its webview panel is actually open.
+  const hostRegistry = new ChatHostRegistry();
+  hostRegistry.register(new CursorHost(commandExecutor, stateManager));
+  const claudeHost = new ClaudeCodeHost({
+    cdpUrl: config.cdpUrl,
+    bridge: extensionBridge,
+    claudeVersion: detectClaudeCodeVersion(),
+  });
+  hostRegistry.register(claudeHost);
+
+  /** Claude tabs are appended after Cursor's, never interleaved. */
+  function mergeClaudeTabs(cursorTabs: ChatTab[]): ChatTab[] {
+    const claudeTabs = claudeHost.listTabs();
+    if (claudeTabs.length === 0) return cursorTabs;
+    const withHost = cursorTabs.map(tab => ({ ...tab, host: tab.host ?? 'cursor' as const }));
+    return hostRegistry.getActiveHost() === 'claude-code'
+      ? [...withHost.map(tab => ({ ...tab, isActive: false })),
+         ...claudeTabs.map((tab, i) => ({ ...tab, isActive: i === 0 }))]
+      : [...withHost, ...claudeTabs];
+  }
+
+  /**
+   * Claude background tasks only appear while a Claude tab is active — mixing
+   * them into the Cursor composer badge would misreport what that tab is doing.
+   */
+  function mergeClaudeBackgroundTasks(cursorTasks: BackgroundTask[]): BackgroundTask[] {
+    if (hostRegistry.getActiveHost() !== 'claude-code') return cursorTasks;
+    return claudeHost.listBackgroundTasks();
+  }
+
+  const claudeRefreshTimer = setInterval(() => {
+    void claudeHost.refresh().catch(err => {
+      console.warn(`[main] Claude host refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  }, Math.max(config.pollIntervalMs, 1000));
+  claudeRefreshTimer.unref?.();
 
   const refreshGlobalApprovals = (): void => {
     const { notifications, registry } = buildApprovalRegistry(windowMonitor.getAllSnapshots());
@@ -166,6 +218,8 @@ async function main(): Promise<void> {
     () => {
       extractor.requestPoll(0);
     },
+    undefined,
+    hostRegistry,
   );
   await relay.start();
 

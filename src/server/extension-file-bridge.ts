@@ -6,6 +6,15 @@ import type {
   OpenSourceControlResult,
 } from '../shared/extension-bridge.js';
 import type { GitActionRequest, GitActionResult } from '../shared/git-scm.js';
+import type {
+  VsCodeCommandRequest,
+  VsCodeCommandResult,
+} from '../shared/vscode-command-bridge.js';
+import {
+  isVsCodeBridgeCommand,
+  vsCodeCommandRequestPath,
+  vsCodeCommandResultPath,
+} from '../shared/vscode-command-bridge.js';
 import type { ExtensionBridgeDiagnostics } from '../shared/diagnostics.js';
 import {
   openSourceControlRequestPath,
@@ -18,10 +27,13 @@ const OPEN_SOURCE_CONTROL_TIMEOUT_MS = 5000;
 const OPEN_SOURCE_CONTROL_POLL_MS = 125;
 const GIT_ACTION_TIMEOUT_MS = 15000;
 const GIT_ACTION_POLL_MS = 125;
+const VSCODE_COMMAND_TIMEOUT_MS = 8000;
+const VSCODE_COMMAND_POLL_MS = 100;
 
 export class ExtensionFileBridge {
   private readonly dataDir: string;
   private gitActionChain: Promise<void> = Promise.resolve();
+  private vsCodeCommandChain: Promise<void> = Promise.resolve();
 
   constructor(dataDir: string, _stateManager: StateManager) {
     this.dataDir = dataDir;
@@ -97,6 +109,63 @@ export class ExtensionFileBridge {
       completedAt: Date.now(),
       error: 'Timed out waiting for extension git action',
     };
+  }
+
+  /**
+   * Run a whitelisted VS Code command in the extension host.
+   * Serialised like git actions — one in flight at a time, so a slow
+   * `claude-vscode.editor.open` cannot interleave with the next request file.
+   */
+  async requestVsCodeCommand(request: VsCodeCommandRequest): Promise<VsCodeCommandResult> {
+    if (!isVsCodeBridgeCommand(request.command)) {
+      return {
+        requestId: request.requestId,
+        ok: false,
+        completedAt: Date.now(),
+        error: `Command not allowed by bridge: ${String(request.command)}`,
+      };
+    }
+
+    const task = this.vsCodeCommandChain.then(() => this.executeVsCodeCommand(request));
+    this.vsCodeCommandChain = task.then(() => undefined, () => undefined);
+    return task;
+  }
+
+  private async executeVsCodeCommand(request: VsCodeCommandRequest): Promise<VsCodeCommandResult> {
+    writeFileSync(
+      vsCodeCommandRequestPath(this.dataDir),
+      JSON.stringify(request) + '\n',
+      'utf-8',
+    );
+
+    const deadline = Date.now() + VSCODE_COMMAND_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const result = this.readVsCodeCommandResult();
+      if (result?.requestId === request.requestId) {
+        return result;
+      }
+      await sleep(VSCODE_COMMAND_POLL_MS);
+    }
+
+    return {
+      requestId: request.requestId,
+      ok: false,
+      completedAt: Date.now(),
+      error: `Timed out waiting for extension to run ${request.command}`,
+    };
+  }
+
+  private readVsCodeCommandResult(): VsCodeCommandResult | null {
+    const path = vsCodeCommandResultPath(this.dataDir);
+    if (!existsSync(path)) return null;
+
+    try {
+      const raw = readFileSync(path, 'utf-8').trim();
+      if (!raw) return null;
+      return JSON.parse(raw) as VsCodeCommandResult;
+    } catch {
+      return null;
+    }
   }
 
   private readGitActionResult(): GitActionResult | null {

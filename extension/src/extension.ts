@@ -7,6 +7,7 @@ import { LicenseManager } from './license-manager.js';
 import { StatusTreeView } from './tree-view.js';
 import { SetupPanel } from './setup-panel.js';
 import { GitStateBridge } from './git-state-bridge.js';
+import { VsCodeCommandBridge } from './vscode-command-bridge.js';
 
 let serverManager: ServerManager | undefined;
 
@@ -72,11 +73,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     serverManager.refreshStatusBar();
   });
 
+  // Lets the server drive `claude-vscode.*` chrome (open/focus a session,
+  // new conversation, accept/reject diff) — commands have no CDP equivalent.
+  const vsCodeCommandBridge = new VsCodeCommandBridge(context, outputChannel);
+  vsCodeCommandBridge.start();
+
   const treeView = new StatusTreeView(serverManager, licenseManager, extensionVersion, gitStateBridge);
 
   context.subscriptions.push(
     outputChannel,
     gitStateBridge,
+    vsCodeCommandBridge,
     vscode.window.registerTreeDataProvider('cursorRemote.status', treeView),
     vscode.commands.registerCommand('cursorRemote.start', () => serverManager!.start()),
     vscode.commands.registerCommand('cursorRemote.stop', () => serverManager!.stop(true)),

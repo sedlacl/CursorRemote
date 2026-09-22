@@ -11,6 +11,9 @@ import { validateAttachments } from './message-attachments.js';
 import { loadSkillCatalog } from './skills-catalog.js';
 import type { StateManager } from './state-manager.js';
 import type { CommandExecutor } from './command-executor.js';
+import { ChatHostRegistry } from './hosts/chat-host-registry.js';
+import { CursorHost } from './hosts/cursor-host.js';
+import type { ChatHost } from './hosts/chat-host.js';
 import type { CDPBridge } from './cdp-bridge.js';
 import type { WindowMonitor } from './window-monitor.js';
 import {
@@ -189,6 +192,7 @@ export class Relay {
   private io: SocketServer;
   private stateManager: StateManager;
   private commandExecutor: CommandExecutor;
+  private readonly hostRegistry: ChatHostRegistry;
   private cdpBridge: CDPBridge;
   private windowMonitor: WindowMonitor;
   private extensionBridge: ExtensionFileBridge;
@@ -226,10 +230,18 @@ export class Relay {
     windowMonitor: WindowMonitor,
     requestFreshExtraction: () => void = () => {},
     diagnosticSnapshotService?: DiagnosticSnapshotService,
+    hostRegistry?: ChatHostRegistry,
   ) {
     this.config = config;
     this.stateManager = stateManager;
     this.commandExecutor = commandExecutor;
+    // Falls back to a Cursor-only registry so existing callers (and tests) that
+    // construct a Relay without hosts keep today's behaviour exactly.
+    this.hostRegistry = hostRegistry ?? (() => {
+      const registry = new ChatHostRegistry();
+      registry.register(new CursorHost(commandExecutor, stateManager));
+      return registry;
+    })();
     this.cdpBridge = cdpBridge;
     this.windowMonitor = windowMonitor;
     this.extensionBridge = extensionBridge;
@@ -429,6 +441,25 @@ export class Relay {
     );
     if (fromCookie && this.sessionStore.has(fromCookie)) return fromCookie;
     return undefined;
+  }
+
+  /**
+   * Host that owns a tab-less command (`new_chat`, `stop`) — the one behind the
+   * currently active chat tab.
+   */
+  private activeHost(): ChatHost {
+    const tabs = this.stateManager.getCurrentState().chatTabs;
+    return this.hostRegistry.forActiveTab(tabs)
+      ?? this.hostRegistry.get('cursor')!;
+  }
+
+  /** Host that owns a specific tab, by composer id. */
+  private hostForComposer(composerId: string | undefined): ChatHost {
+    if (!composerId) return this.activeHost();
+    const tab = this.stateManager
+      .getCurrentState()
+      .chatTabs.find(t => t.composerId === composerId);
+    return this.hostRegistry.forTab(tab) ?? this.hostRegistry.get('cursor')!;
   }
 
   private buildDiagnostics(): ServerDiagnostics {
@@ -1051,7 +1082,7 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: send_message from ${socket.id}`);
-        const result = await this.commandExecutor.sendMessage(
+        const result = await this.activeHost().sendMessage(
           payload.commandId,
           text || undefined,
           attachments
@@ -1141,6 +1172,7 @@ export class Relay {
           } satisfies CommandResult);
           return;
         }
+        const host = this.activeHost();
         const selectorPath = payload.selectorPath
           ?? (payload.approvalId
             ? resolveApprovalActionSelector(
@@ -1149,7 +1181,9 @@ export class Relay {
               payload.actionType === 'approve_all' ? 'approve_all' : 'approve',
             )
             : undefined);
-        if (!selectorPath) {
+        // Only Cursor identifies an approval by a selector path resolved from
+        // the extracted registry; Claude finds the live prompt in its own DOM.
+        if (!selectorPath && host.id === 'cursor') {
           socket.emit('command:result', {
             commandId: payload.commandId,
             ok: false,
@@ -1158,10 +1192,11 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: approve from ${socket.id}`);
-        const result = await this.commandExecutor.clickApproval(
-          payload.commandId,
+        const result = await host.approve({
+          commandId: payload.commandId,
+          approvalId: payload.approvalId,
           selectorPath,
-        );
+        });
         socket.emit('command:result', result);
       });
 
@@ -1188,6 +1223,7 @@ export class Relay {
           } satisfies CommandResult);
           return;
         }
+        const host = this.activeHost();
         const selectorPath = payload.selectorPath
           ?? (payload.approvalId
             ? resolveApprovalActionSelector(
@@ -1196,7 +1232,7 @@ export class Relay {
               'reject',
             )
             : undefined);
-        if (!selectorPath) {
+        if (!selectorPath && host.id === 'cursor') {
           socket.emit('command:result', {
             commandId: payload.commandId,
             ok: false,
@@ -1205,10 +1241,11 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: reject from ${socket.id}`);
-        const result = await this.commandExecutor.reject(
-          payload.commandId,
+        const result = await host.reject({
+          commandId: payload.commandId,
+          approvalId: payload.approvalId,
           selectorPath,
-        );
+        });
         socket.emit('command:result', result);
       });
 
@@ -1222,13 +1259,17 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: switch_tab to "${payload.tabTitle ?? payload.composerId ?? payload.selectorPath}" from ${socket.id}`);
-        const result = await this.commandExecutor.switchTab(
-          payload.commandId,
-          payload.tabTitle ?? '',
-          payload.selectorPath,
-          payload.composerId,
-          payload.tabSource
-        );
+        const tabHost = this.hostForComposer(payload.composerId);
+        const result = await tabHost.switchTab(payload.commandId, {
+          composerId: payload.composerId ?? '',
+          title: payload.tabTitle ?? '',
+          selectorPath: payload.selectorPath,
+          source: payload.tabSource,
+        });
+        if (result.ok) {
+          // Tab-less commands (new_chat, stop) follow the tab the user is on.
+          this.hostRegistry.setActiveHost(tabHost.id);
+        }
         socket.emit('command:result', result);
       });
 
@@ -1292,7 +1333,8 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: new_chat from ${socket.id}`);
-        const result = await this.commandExecutor.newChat(payload.commandId);
+        // A new session belongs to the host of the tab the user is looking at.
+        const result = await this.activeHost().newChat(payload.commandId);
         socket.emit('command:result', result);
       });
 
@@ -1466,20 +1508,10 @@ export class Relay {
           } satisfies CommandResult);
           return;
         }
-        const state = this.stateManager.getCurrentState();
-        const selectorPath = state.agentStopSelectorPath
-          || state.backgroundTasks.find(task => task.stopSelectorPath)?.stopSelectorPath
-          || '';
-        if (!selectorPath) {
-          socket.emit('command:result', {
-            commandId: payload.commandId,
-            ok: false,
-            error: 'Stop button not available',
-          } satisfies CommandResult);
-          return;
-        }
         console.log(`[relay] Command: stop_agent from ${socket.id}`);
-        const result = await this.commandExecutor.clickAction(payload.commandId, selectorPath);
+        // Stops the main turn only — a background task is stopped by its own
+        // row, and `/tasks` is never opened from the relay.
+        const result = await this.activeHost().stopTurn(payload.commandId);
         if (result.ok) {
           this.requestFreshExtractionBurst();
         }
