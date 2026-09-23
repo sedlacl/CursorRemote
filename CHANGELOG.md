@@ -9,6 +9,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **Ask to restart Cursor when CDP is off**: when the extension starts and remote debugging is not listening, it asks whether to restart Cursor with CDP. The prompt is on by default. Turn it off with **CursorRemote: Prompt Restart Without CDP** (`cursorRemote.promptRestartWithoutCdp`), or choose **Don't ask again** in the dialog. Restart still closes every Cursor window.
 
+### Fixed
+- **Settings filter matches the installed build**: the Setup panel shows and copies `@ext:<id>` of the extension that is actually running, so a local dev build (`cursor-remote-dev.cursor-remote`) no longer gets the marketplace filter that finds nothing.
+
 ## [0.4.5] - 2026-09-18
 
 ### Fixed

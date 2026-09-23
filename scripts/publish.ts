@@ -389,7 +389,7 @@ function main(): void {
 
     if (!doCommit) {
       console.log('Files synced. Review the public repo, then run again with --commit:');
-      console.log(`  npm run publish:public -- --commit`);
+      console.log(`  npm run release:publish-public -- --commit`);
       console.log(`\nOr commit manually:`);
       console.log(`  cd ${publicRoot} && git add -A && git commit && git push`);
       if (!doOvsx) return;
@@ -399,7 +399,7 @@ function main(): void {
         console.error(`  Add a ## [${version}] - YYYY-MM-DD section in CHANGELOG.md (implementation date),`);
         console.error(`  keep package.json in sync, then run:`);
         console.error(`  npm run release -- patch|minor|major`);
-        console.error(`  npm run publish:public -- --commit`);
+        console.error(`  npm run release:publish-public -- --commit`);
         process.exit(1);
       }
 

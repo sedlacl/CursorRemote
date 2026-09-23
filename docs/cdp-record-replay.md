@@ -31,8 +31,8 @@ Both scripts are standalone processes. They import shared code from `src/` as li
 ### Command
 
 ```bash
-npm run record                            # record first Cursor window
-npm run record -- --window cursor-ide     # match window by title substring
+npm run cdp:record                            # record first Cursor window
+npm run cdp:record -- --window cursor-ide     # match window by title substring
 ```
 
 ### What it does
@@ -66,7 +66,7 @@ Each line is a JSON object:
 ### Command
 
 ```bash
-npm run replay -- <recording.jsonl> --thread <topic_id> [--chat <group_id>] [--speed N]
+npm run cdp:replay -- <recording.jsonl> --thread <topic_id> [--chat <group_id>] [--speed N]
 ```
 
 ### Arguments
@@ -125,7 +125,7 @@ The group chat ID (negative number like `-1001234567890`):
 
 ```bash
 # 1. Start recording while reproducing the issue
-npm run record -- --window cursor-ide
+npm run cdp:record -- --window cursor-ide
 
 # 2. Do the thing in Cursor that triggers the bug
 #    (e.g. start an agent task, wait for activity indicators)
@@ -135,12 +135,12 @@ npm run record -- --window cursor-ide
 # 4. Create a test topic in your Telegram group
 
 # 5. Replay to see what the relay would send
-npm run replay -- data/recording-2026-03-24T00-24-00.jsonl --thread 99999 --speed 5
+npm run cdp:replay -- data/recording-2026-03-24T00-24-00.jsonl --thread 99999 --speed 5
 
 # 6. Check the test topic in Telegram -- does it look right?
 
 # 7. Fix the code, replay the same recording, compare
-npm run replay -- data/recording-2026-03-24T00-24-00.jsonl --thread 99999 --speed 5
+npm run cdp:replay -- data/recording-2026-03-24T00-24-00.jsonl --thread 99999 --speed 5
 ```
 
 ### Regression testing

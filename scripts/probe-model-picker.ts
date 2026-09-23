@@ -13,7 +13,7 @@ interface CDPTarget {
 // then dumps the resulting menu (and its child rows) so we can confirm the
 // selectors used inside command-executor.ts still work on the current Cursor.
 //
-// Usage: npm run discover -- model-picker
+// Usage: npm run cdp:discover-dom -- model-picker
 // or:    npx tsx scripts/probe-model-picker.ts [--window <substring>]
 
 async function main() {

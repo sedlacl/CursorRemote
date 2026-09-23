@@ -137,7 +137,7 @@ Edit `.env` -- the defaults work for the web client. For Telegram, set `TELEGRAM
 npm run dev
 ```
 
-**License key (first run only):** You'll be prompted for a license key. Get one from the [store](https://cursor-remote.com/buy?utm_source=github&utm_medium=setup_guide&utm_campaign=license). The key is saved to `data/license.key` and won't be asked again on subsequent runs. For production (`npm start`), ensure the key file exists before starting.
+**License key (first run only):** You'll be prompted for a license key. Get one from the [store](https://cursor-remote.com/buy?utm_source=github&utm_medium=setup_guide&utm_campaign=license). The key is saved to `data/license.key` and won't be asked again on subsequent runs. For production (`npm run server:start`), ensure the key file exists before starting.
 
 ```
 [main] CDP URL: http://127.0.0.1:9222
@@ -304,11 +304,11 @@ npm run dev
 ### Option B: Compiled
 
 ```bash
-npm run build
-npm start
+npm run build:server
+npm run server:start
 ```
 
-Ensure `data/license.key` exists before running `npm start` (no prompt in production mode).
+Ensure `data/license.key` exists before running `npm run server:start` (no prompt in production mode).
 
 ---
 
@@ -318,7 +318,7 @@ Ensure `data/license.key` exists before running `npm start` (no prompt in produc
 
 #### "No valid license key" or server exits immediately
 - **Extension:** Open the CursorRemote sidebar panel and click "License Key Required" to enter your key
-- **Standalone:** Run `npm run dev` (not `npm start`) to get the interactive prompt
+- **Standalone:** Run `npm run dev` (not `npm run server:start`) to get the interactive prompt
 - Get a valid key from the [store](https://cursor-remote.com/buy?utm_source=github&utm_medium=setup_guide&utm_campaign=license)
 
 #### "Disconnected" in web UI
@@ -379,8 +379,8 @@ Ensure `data/license.key` exists before running `npm start` (no prompt in produc
 - Required: Manage Topics, Delete Messages, Pin Messages
 
 #### Build doesn't work on macOS
-- `npm run build` compiles TS and copies `src/client/` to `dist/client/`
-- `npm start` creates the `temp/` directory automatically
+- `npm run build:server` compiles TS and copies `src/client/` to `dist/client/`
+- `npm run server:start` creates the `temp/` directory automatically
 
 #### Server log
 All output with timestamps: `temp/server.log`

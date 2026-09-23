@@ -299,7 +299,7 @@ Both require a Windows Firewall inbound rule for TCP 3000.
 
 1. Extraction catches all errors, returns `null`
 2. State Manager treats `null` as "no change" (keeps last known state)
-3. After 10 consecutive nulls, logs warning suggesting `npm run discover`
+3. After 10 consecutive nulls, logs warning suggesting `npm run cdp:discover-dom`
 
 ### 4.3 Client Disconnection
 

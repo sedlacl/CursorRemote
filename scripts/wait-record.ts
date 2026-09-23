@@ -1,7 +1,7 @@
 /**
  * Blocks for a fixed duration so you can screen-record (e.g. Telegram + web quoted UI).
- * Usage: npx tsx scripts/wait-record.ts
- *        npx tsx scripts/wait-record.ts 90   (custom seconds)
+ * Usage: npm run cdp:record-wait
+ *        npm run cdp:record-wait -- 90   (custom seconds)
  */
 
 const sec = Math.max(1, parseInt(process.argv[2] ?? '60', 10) || 60);

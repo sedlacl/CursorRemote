@@ -1,4 +1,4 @@
-/** Relay port used by Vite dev proxy (`npm run dev:gui`). */
+/** Relay port used by Vite dev proxy (`npm run dev:web`). */
 export function resolveRelayProxyPort(env: Record<string, string | undefined> = process.env): number {
   const explicit = env.CURSOR_REMOTE_RELAY_PORT?.trim();
   if (explicit) {

@@ -52,7 +52,7 @@ This extension uses a separate publisher ID and visual identity so it is not con
 | **Best for** | Daily use on your dev machine | Headless servers, CI, or manual configuration |
 | **Install** | One `.vsix` file | Clone repo + `npm install` |
 | **Configuration** | VS Code Settings + Setup Panel | `.env` file |
-| **Server lifecycle** | Auto-starts, sidebar Start/Stop | Manual `npm run dev` or `npm start` |
+| **Server lifecycle** | Auto-starts, sidebar Start/Stop | Manual `npm run dev` or `npm run server:start` |
 | **Status UI** | Sidebar panel with live status | Terminal logs + `/health` endpoint |
 | **Password** | Auto-generated on first install | Manual in `.env` |
 | **Multi-window** | Singleton — one server across all windows | Single process |
@@ -204,11 +204,11 @@ Edit `.env` to configure the server. For Telegram, set `TELEGRAM_ENABLED=true` a
 ### Production
 
 ```bash
-npm run build
-npm start
+npm run build:server
+npm run server:start
 ```
 
-Ensure `data/license.key` exists before running `npm start` (no interactive prompt in production mode).
+Ensure `data/license.key` exists before running `npm run server:start` (no interactive prompt in production mode).
 
 > **WSL2 users**: see [Setup Guide](docs/setup-guide.md) for port forwarding details.
 
@@ -270,13 +270,13 @@ Plain text in any topic is sent as a prompt to the mapped Cursor agent.
 | Command | Description |
 |---------|-------------|
 | `npm run dev` | Development with hot-reload (prompts for license key if missing) |
-| `npm run build` | Compile TS + copy client |
-| `npm run build:ext` | Bundle the VS Code extension |
-| `npm run watch:ext` | Watch-mode for extension development |
-| `npm run package` | Bump patch version and package .vsix into `releases/` |
+| `npm run build:server` | Compile TS + copy client |
+| `npm run build:extension` | Bundle the VS Code extension |
+| `npm run watch:extension` | Watch-mode for extension development |
+| `npm run vsix:release` | Bump patch version and package .vsix into `releases/` |
 | `npm run release -- patch\|minor\|major` | Bump version, update changelog, create git tag |
-| `npm start` | Run compiled server |
-| `npm run discover` | DOM discovery tool |
+| `npm run server:start` | Run compiled server |
+| `npm run cdp:discover-dom` | DOM discovery tool |
 
 ## Extension Dev Loop
 
@@ -293,7 +293,7 @@ In the **main** Cursor window, stop CursorRemote server or disable the installed
 
 The dev workspace uses `serverPort = 3002` and points CDP at the same Cursor process (`http://127.0.0.1:19222` if your shortcut uses that port). CDP is per Cursor process, not per window — `--remote-debugging-port` in `launch.json` does not open a second CDP endpoint for the Extension Development Host. Your main Cursor shortcut must already include `--remote-debugging-port=19222` (or whatever port you set in `cursorRemote.cdpUrl`).
 
-In Extension Development Host, the server serves the **live React client** from `src/client/` via Vite (`CLIENT_SRC_DIR`). After UI changes you only need a browser refresh — no `npm run build` unless you test the packaged `dist/client` bundle. Keep `watch:ext` running so `dist/server/bundle.mjs` and the extension stay current.
+In Extension Development Host, the server serves the **live React client** from `src/client/` via Vite (`CLIENT_SRC_DIR`). After UI changes you only need a browser refresh — no `npm run build:server` unless you test the packaged `dist/client` bundle. Keep `watch:extension` running so `dist/server/bundle.mjs` and the extension stay current.
 
 ## Documentation
 

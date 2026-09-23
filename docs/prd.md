@@ -630,7 +630,7 @@ For elements outside the data-attribute system (chat container, input, approve/r
 
 ### 7.3 Discovery Tool
 
-A CLI utility (`src/discovery/discover-dom.ts`, run via `npm run discover`) connects to Cursor via CDP and:
+A CLI utility (`src/discovery/discover-dom.ts`, run via `npm run cdp:discover-dom`) connects to Cursor via CDP and:
 
 1. Lists all CDP targets (pages, webviews, workers)
 2. Dumps a summarized DOM tree of the main window

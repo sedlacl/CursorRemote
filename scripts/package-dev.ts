@@ -27,7 +27,7 @@ function main(): void {
 
   try {
     console.log(`[package:dev] Building QJohn CursorRemote (Dev) v${devVersion}`);
-    execSync('npm run build && npm run build:ext', { cwd: ROOT, stdio: 'inherit' });
+    execSync('npm run build:server && npm run build:extension', { cwd: ROOT, stdio: 'inherit' });
 
     if (!existsSync(RELEASES_DIR)) mkdirSync(RELEASES_DIR, { recursive: true });
 

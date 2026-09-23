@@ -17,7 +17,7 @@ function main(): void {
   const devVersion = devPackageVersion(pkg.version);
   const vsixPath = resolve(RELEASES_DIR, `cursor-remote-dev-${versionForFilename(devVersion)}.vsix`);
 
-  execSync('npm run package:dev', { cwd: ROOT, stdio: 'inherit' });
+  execSync('npm run vsix:dev', { cwd: ROOT, stdio: 'inherit' });
 
   if (!existsSync(vsixPath)) {
     throw new Error(`VSIX not found after build: ${vsixPath}`);

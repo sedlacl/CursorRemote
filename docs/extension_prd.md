@@ -279,12 +279,12 @@ On startup, the server tests outbound HTTPS with raw `fetch` to `api.telegram.or
 - `socket.io.min.js` copied from `node_modules` to `dist/client/`
 
 ### 12.4 Packaging
-- `npm run package` bumps the patch version, then runs `vsce package --no-dependencies`
+- `npm run vsix:release` bumps the patch version, then runs `vsce package --no-dependencies`
 - Output: `releases/cursor-remote-X.Y.Z.vsix`
 - `.vscodeignore` includes only: `dist/extension.cjs`, `dist/server/bundle.mjs`, `dist/client/`, `extension/media/walkthrough/`, `selectors.json`, `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`
 
 ### 12.5 Version Bumping
-- `npm run package` auto-increments the patch version via `scripts/bump-build.ts`
+- `npm run vsix:release` auto-increments the patch version via `scripts/bump-build.ts`
 - `npm run release -- patch|minor|major` bumps semantic version, updates changelog, creates a git tag
 
 ---
@@ -299,4 +299,4 @@ Every enhancement is gated behind an env var that defaults to existing behavior:
 | `DATA_DIR` | not set → `./data` | `context.globalStorageUri.fsPath` |
 | `LOG_FORMAT` | not set → plain text | `json` |
 
-Standalone `npm run dev` and `npm start` work identically to before. The `.env` file, `data/` directory, and all CLI behavior are unchanged.
+Standalone `npm run dev` and `npm run server:start` work identically to before. The `.env` file, `data/` directory, and all CLI behavior are unchanged.

@@ -85,7 +85,7 @@ function main(): void {
   console.log(`\n✓ Created commit and tag v${newVersion}`);
   console.log(`\nNext steps:`);
   console.log(`  git push && git push --tags`);
-  console.log(`  npm run publish:public -- --commit --push --ovsx`);
+  console.log(`  npm run release:publish-public -- --commit --push --ovsx`);
 }
 
 main();

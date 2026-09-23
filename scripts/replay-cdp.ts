@@ -47,7 +47,7 @@ async function main() {
   const dryRun = args.includes('--dry-run') || args.includes('--dry');
 
   if (!filePath || (!threadId && !dryRun)) {
-    console.log('Usage: npm run replay -- <recording.jsonl> --thread <topic_id> [--chat <group_id>] [--speed N] [--dry-run]');
+    console.log('Usage: npm run cdp:replay -- <recording.jsonl> --thread <topic_id> [--chat <group_id>] [--speed N] [--dry-run]');
     console.log('\nRequires TELEGRAM_BOT_TOKEN in .env (unless --dry-run)');
     console.log('  --thread   Telegram forum topic message_thread_id');
     console.log('  --chat     Telegram group chat ID (default: from TELEGRAM_CHAT_ID env)');

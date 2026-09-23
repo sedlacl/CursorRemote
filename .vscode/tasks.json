@@ -17,12 +17,12 @@
       "problemMatcher": []
     },
     {
-      // `build` makes the web client (dist/client) and typechecks;
-      // `build:ext` makes dist/extension.cjs AND dist/server/bundle.mjs.
+      // `build:server` makes the web client (dist/client) and typechecks;
+      // `build:extension` makes dist/extension.cjs AND dist/server/bundle.mjs.
       // Neither covers the other, so both have to run.
       "label": "CursorRemote: build all",
       "type": "shell",
-      "command": "npm run build && npm run build:ext",
+      "command": "npm run build:server && npm run build:extension",
       "options": { "cwd": "${workspaceFolder}" },
       "presentation": {
         "reveal": "always",
@@ -73,7 +73,7 @@
     {
       "label": "CursorRemote: watch extension",
       "type": "npm",
-      "script": "watch:ext",
+      "script": "watch:extension",
       "isBackground": true,
       "problemMatcher": []
     },

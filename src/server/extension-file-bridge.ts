@@ -185,7 +185,7 @@ export class ExtensionFileBridge {
 
     if (Array.isArray(info.commands) && !info.commands.includes(command)) {
       return `${info.extensionId}@${info.extensionVersion} does not support ${command}. `
-        + 'Rebuild (npm run build:ext) and reload the extension host.';
+        + 'Rebuild (npm run build:extension) and reload the extension host.';
     }
 
     return null;

@@ -10,14 +10,14 @@ alwaysApply: true
 ```bash
 npm run dev      # tsx watch přes scripts/dev-wrapper.ts — server na :3001
 npm test         # povinné před „hotovo“ (tsx --test tests/*.test.ts)
-npm run build    # tsc + kopie src/client → dist/client
-npm run probe    # scripts/probe-cdp.ts — základní CDP průzkum
+npm run build:server    # tsc + kopie src/client → dist/client
+npm run cdp:probe    # scripts/probe-cdp.ts — základní CDP průzkum
 npx tsx scripts/probe-tabs.ts [--window <název>]
 ```
 
 ## Ověření změn
 
-1. **Server (TS)**: `npm test` + `npm run build`. `tsx watch` načte změny v `src/server/` automaticky.
+1. **Server (TS)**: `npm test` + `npm run build:server`. `tsx watch` načte změny v `src/server/` automaticky.
 2. **Web klient** (`src/client/`): statické soubory — stačí **obnovit prohlížeč** na `http://localhost:3001`.
 3. **DOM extrakce / příkazy**: vyžaduje běžící Cursor s CDP (`cursorRemote.cdpUrl`, typicky `http://127.0.0.1:9222` nebo `19222`).
 

@@ -171,7 +171,7 @@ with the Claude panel open. It never types, clicks, sends or runs a slash
 command, and it dumps DOM plus screenshots into gitignored `temp/`.
 
 ```bash
-npm run probe:claude       # what the DOM actually contains
+npm run claude:probe       # what the DOM actually contains
 ```
 
 Run it whenever the Claude Code extension version changes, then update
@@ -184,12 +184,12 @@ running IDE. It is read-only unless a flag says otherwise, because every action
 it can take is irreversible — `--send` posts a real message into a real session.
 
 ```bash
-npm run verify:claude                          # connection, tabs, controls, background tasks
-npm run verify:claude -- --send "ping"         # sends for real
-npm run verify:claude -- --new-chat
-npm run verify:claude -- --switch 1            # tab index from the listing
-npm run verify:claude -- --stop
-npm run verify:claude -- --approve             # or --reject, while a prompt is pending
+npm run claude:verify                          # connection, tabs, controls, background tasks
+npm run claude:verify -- --send "ping"         # sends for real
+npm run claude:verify -- --new-chat
+npm run claude:verify -- --switch 1            # tab index from the listing
+npm run claude:verify -- --stop
+npm run claude:verify -- --approve             # or --reject, while a prompt is pending
 ```
 
 Anything routed through the extension command bridge (`--new-chat`, `--switch`,

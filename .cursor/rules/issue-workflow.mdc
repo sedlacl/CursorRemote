@@ -71,7 +71,7 @@ pocitu hotovo.
 
 ### 4. Ověření
 
-- `npm test` + `npm run build` (viz `dev-workflow.mdc`).
+- `npm test` + `npm run build:server` (viz `dev-workflow.mdc`).
 - Změna web UI → vizuální kontrola na `http://localhost:3001`.
 - Změna extension → upozorni uživatele před testy/buildem.
 
@@ -107,7 +107,7 @@ Fix zůstává v kódu a changelogu.
 
 - [ ] Issues roztříděny (actionable vs. non-actionable)
 - [ ] Fix podle Likely cause / Suggested fix; DOM → probe first
-- [ ] `npm test` + `npm run build` OK; web UI vizuálně OK
+- [ ] `npm test` + `npm run build:server` OK; web UI vizuálně OK
 - [ ] Changelog + verze podle `changelog.mdc`
 - [ ] Vyřešené issue + `.artifacts/` smazány; README Stav aktualizován
 - [ ] Non-actionable oznámeny nebo smazány se souhlasem

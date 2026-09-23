@@ -49,8 +49,8 @@ jobs:
 
       - name: Build project and extension
         run: |
-          npm run build
-          npm run build:ext
+          npm run build:server
+          npm run build:extension
 
       - name: Package public VSIX without version bump
         run: |

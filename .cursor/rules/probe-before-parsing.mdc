@@ -10,7 +10,7 @@ Nikdy nehádej selektory pro Cursor UI. Nejdřív ověř proti běžícímu work
 
 ## Jak probeovat
 
-1. `npm run probe` nebo `npx tsx scripts/probe-tabs.ts`
+1. `npm run cdp:probe` nebo `npx tsx scripts/probe-tabs.ts`
 2. Nový případ → krátký `scripts/probe-<téma>.ts` (vzor: `probe-tabs.ts`)
 3. V `callFunction`/`evaluate` vypiš: `class`, `data-*`, `aria-label`, `textContent` vzorky
 
