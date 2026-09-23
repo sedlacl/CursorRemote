@@ -31,7 +31,7 @@ import {
   parseHistoryIndex,
   parseSessionId,
 } from '../src/server/hosts/claude-code-host.js';
-import { claudeTargetRank } from '../src/server/hosts/claude-webview-client.js';
+import { claudeTargetBelongsToWindow, claudeTargetRank } from '../src/server/hosts/claude-webview-client.js';
 import type { ChatHostId, ChatTab, CommandResult, CursorState } from '../src/server/types.js';
 
 function tab(overrides: Partial<ChatTab> & { composerId: string }): ChatTab {
@@ -288,6 +288,15 @@ describe('Claude tab ids', () => {
     assert.equal(parseClaudePanelId(`claude:panel:${name}`), null);
     assert.equal(parseHistoryIndex('claude:history:2'), '2');
     assert.equal(parseHistoryIndex('claude:history:abc'), null);
+  });
+
+  it('keeps a Claude editor on the Cursor window that owns its parent frame', () => {
+    const remoteWindow = 'F44DA1B6';
+    const remoteParent = 'F44DA1B6D22B9E21ACE1708BB4460EAE';
+    const otherParent = 'C793A09765A0717C7969DD450D4E4FE8';
+    assert.equal(claudeTargetBelongsToWindow(remoteParent, remoteWindow), true);
+    assert.equal(claudeTargetBelongsToWindow(otherParent, remoteWindow), false);
+    assert.equal(claudeTargetBelongsToWindow(remoteParent, ''), false);
   });
 
   it('prefers a visible side panel over a visible editor when both are open', () => {

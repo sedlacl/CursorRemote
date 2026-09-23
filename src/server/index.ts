@@ -110,6 +110,7 @@ async function main(): Promise<void> {
     cdpUrl: config.cdpUrl,
     bridge: extensionBridge,
     claudeVersion: detectClaudeCodeVersion(),
+    getWindowTargetId: () => cdpBridge.activeTargetId,
   }));
 
   const extractor = new DOMExtractor(

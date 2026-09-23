@@ -36,6 +36,11 @@ export interface ClaudeWebviewTarget {
   webviewName: string;
   /** `webviewView` for the side panel; absent/other when opened as an editor tab. */
   purpose: string;
+  /**
+   * CDP `parentId` of the webview iframe. It starts with the workbench page id,
+   * which is how a Claude editor is tied to one Cursor window.
+   */
+  parentId: string;
   view: ClaudeWebviewView;
   /**
    * Whether this surface is currently on screen.
@@ -54,6 +59,8 @@ interface CDPTargetJson {
   title: string;
   url: string;
   webSocketDebuggerUrl?: string;
+  /** Present on webview iframes. Prefix is the parent workbench page id. */
+  parentId?: string;
 }
 
 /** Query-string marker every Claude Code webview target carries. */
@@ -106,8 +113,19 @@ const VIEW_PROBE_JS = `
 /** Is the connected surface still the one on screen? */
 const VISIBILITY_JS = `document.visibilityState === 'visible'`;
 
+/**
+ * A Claude webview belongs to the Cursor window whose workbench target id is
+ * the prefix of the iframe's CDP `parentId` (probed 2026-09-23: two windows,
+ * each with its own Claude editor).
+ */
+export function claudeTargetBelongsToWindow(parentId: string, windowTargetId: string): boolean {
+  return windowTargetId.length > 0 && parentId.startsWith(windowTargetId);
+}
+
 export class ClaudeWebviewClient {
   private readonly cdpUrl: string;
+  private readonly getWindowTargetId: () => string;
+  private boundWindowId = '';
   private client: CdpClient | null = null;
   private target: ClaudeWebviewTarget | null = null;
   private knownTargets: ClaudeWebviewTarget[] = [];
@@ -121,8 +139,24 @@ export class ClaudeWebviewClient {
   private listClient: CdpClient | null = null;
   private listTarget: ClaudeWebviewTarget | null = null;
 
-  constructor(cdpUrl: string) {
+  constructor(cdpUrl: string, getWindowTargetId: () => string = () => '') {
     this.cdpUrl = cdpUrl;
+    this.getWindowTargetId = getWindowTargetId;
+  }
+
+  /**
+   * Drop a connection that belongs to a different Cursor window.
+   * Returns true when the active window changed, so the caller rediscovers now.
+   */
+  prepareForActiveWindow(): boolean {
+    const windowId = this.getWindowTargetId();
+    const changed = windowId !== this.boundWindowId;
+    this.boundWindowId = windowId;
+    const stale = !windowId
+      || (this.target !== null && !claudeTargetBelongsToWindow(this.target.parentId, windowId));
+    if (stale && (this.client || this.target)) this.disconnect();
+    if (changed) this.knownTargets = [];
+    return changed;
   }
 
   getClient(): CdpClient | null {
@@ -160,10 +194,24 @@ export class ClaudeWebviewClient {
     }
     if (!Array.isArray(targets)) return [];
 
+    const windowId = this.getWindowTargetId();
+    if (windowId !== this.boundWindowId) {
+      this.boundWindowId = windowId;
+      this.knownTargets = [];
+    }
+    if (this.target && !claudeTargetBelongsToWindow(this.target.parentId, windowId)) {
+      this.disconnect();
+    }
+    if (!windowId) {
+      this.knownTargets = [];
+      return [];
+    }
+
     const candidates = targets.filter(
       t => typeof t.url === 'string'
         && t.url.includes(CLAUDE_EXTENSION_MARKER)
-        && !!t.webSocketDebuggerUrl,
+        && !!t.webSocketDebuggerUrl
+        && claudeTargetBelongsToWindow(typeof t.parentId === 'string' ? t.parentId : '', windowId),
     );
 
     const found: ClaudeWebviewTarget[] = [];
@@ -175,6 +223,7 @@ export class ClaudeWebviewClient {
         wsUrl: candidate.webSocketDebuggerUrl!,
         webviewName: parseQueryParam(candidate.url, 'id'),
         purpose: parseQueryParam(candidate.url, 'purpose'),
+        parentId: typeof candidate.parentId === 'string' ? candidate.parentId : '',
         view,
         visible,
       });

@@ -211,9 +211,14 @@ export class ClaudeCodeHost extends BaseChatHost {
     bridge: ExtensionFileBridge;
     /** Installed Claude Code version, for the background-tasks schema gate. */
     claudeVersion?: string | null;
+    /** Workbench target the relay is attached to. Claude webviews outside it are ignored. */
+    getWindowTargetId?: () => string;
   }) {
     super();
-    this.webview = new ClaudeWebviewClient(options.cdpUrl);
+    this.webview = new ClaudeWebviewClient(
+      options.cdpUrl,
+      options.getWindowTargetId ?? (() => ''),
+    );
     this.bridge = options.bridge;
     this.claudeVersion = options.claudeVersion ?? null;
   }
@@ -288,6 +293,7 @@ export class ClaudeCodeHost extends BaseChatHost {
    * extractor tick.
    */
   async ensureConnected(): Promise<boolean> {
+    if (this.webview.prepareForActiveWindow()) this.lastDiscoveryAt = 0;
     if (this.webview.isConnected()) {
       // Staying attached to a surface the user has switched away from would
       // send messages into a session nobody is watching. Cheap check, one

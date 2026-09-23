@@ -17,6 +17,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - **Mode on a Claude tab no longer changes the Cursor composer**: a Claude tab showed Cursor's mode pill, so choosing Plan switched the Cursor composer next to it, for example one running Codex. Claude tabs now hide the mode pill and the model picker until those Claude menus are supported. Cursor's questionnaire, queue, subagents and stop control no longer appear on a Claude tab either.
 - **Jumping to an approval or a parent chat returns to Cursor**: after **Needs approval** or **Back to parent** opened a Cursor chat from a Claude tab, later commands still went to Claude. They now follow the Cursor tab.
+- **Claude editor follows the connected Cursor window**: with two Cursor windows open, each can have its own Claude editor. The remote tab now uses only the webview whose frame belongs to the window the relay is attached to.
 - **Claude user messages are no longer doubled**: a user row included its screen-reader heading (`You: …`) plus the same text again, so the bubble showed the message twice. The heading is dropped.
 - **Claude Stop interrupts the turn**: the header showed Generating, but Stop only synthesized a DOM click, which never reached Claude's interrupt handler. Stop now calls that handler, and clears a turn that stays stuck on Stop after the connection is gone.
 - **Claude model pill shows the Claude model**: an active Claude tab no longer keeps the Cursor composer model, such as Grok, in the pill.
