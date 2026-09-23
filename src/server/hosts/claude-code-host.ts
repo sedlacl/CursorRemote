@@ -126,7 +126,13 @@ export class ClaudeCodeHost extends BaseChatHost {
    * extractor tick.
    */
   async ensureConnected(): Promise<boolean> {
-    if (this.webview.isConnected()) return true;
+    if (this.webview.isConnected()) {
+      // Staying attached to a surface the user has switched away from would
+      // send messages into a session nobody is watching. Cheap check, one
+      // evaluate; re-discovery only happens once it actually goes hidden.
+      if (await this.webview.isTargetVisible()) return true;
+      this.lastDiscoveryAt = 0;
+    }
 
     const now = Date.now();
     if (now - this.lastDiscoveryAt < DISCOVERY_THROTTLE_MS) return false;

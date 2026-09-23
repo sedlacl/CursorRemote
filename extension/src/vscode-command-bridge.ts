@@ -1,16 +1,20 @@
 import * as vscode from 'vscode';
-import { existsSync, readFileSync, writeFileSync, watch, type FSWatcher } from 'fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, watch, type FSWatcher } from 'fs';
 import type { UnifiedOutputChannel } from './output-channel.js';
 import type {
   VsCodeCommandRequest,
   VsCodeCommandResult,
 } from '../../src/shared/vscode-command-bridge.js';
 import {
+  VSCODE_BRIDGE_COMMANDS,
+  VSCODE_COMMAND_BRIDGE_PROTOCOL,
   VSCODE_COMMAND_REQUEST_FILENAME,
   isVsCodeBridgeCommand,
+  vsCodeCommandBridgeInfoPath,
   vsCodeCommandRequestPath,
   vsCodeCommandResultPath,
 } from '../../src/shared/vscode-command-bridge.js';
+import type { VsCodeCommandBridgeInfo } from '../../src/shared/vscode-command-bridge.js';
 
 /**
  * Runs whitelisted VS Code commands on behalf of the CursorRemote server.
@@ -30,14 +34,35 @@ export class VsCodeCommandBridge implements vscode.Disposable {
   private lastRequestId = '';
   private disposed = false;
 
+  private readonly info: VsCodeCommandBridgeInfo;
+
   constructor(context: vscode.ExtensionContext, outputChannel: UnifiedOutputChannel) {
     this.outputChannel = outputChannel;
     this.dataDir = context.globalStorageUri.fsPath;
+    this.info = {
+      protocol: VSCODE_COMMAND_BRIDGE_PROTOCOL,
+      extensionId: context.extension.id,
+      extensionVersion: String(context.extension.packageJSON?.version ?? 'unknown'),
+      commands: [...VSCODE_BRIDGE_COMMANDS],
+      pid: process.pid,
+      startedAt: Date.now(),
+    };
   }
 
   start(): void {
     if (this.watcher) return;
     try {
+      // On a fresh install globalStorage may not exist yet, and watch() would
+      // throw — leaving the bridge silently deaf.
+      if (!existsSync(this.dataDir)) {
+        mkdirSync(this.dataDir, { recursive: true });
+      }
+      // Announce before watching, so a server that starts first still finds us.
+      this.announce();
+      this.outputChannel.info(
+        `[vscode-command-bridge] ${this.info.extensionId}@${this.info.extensionVersion} `
+        + `(protocol ${this.info.protocol}) watching ${this.dataDir}`,
+      );
       this.watcher = watch(this.dataDir, (_eventType, filename) => {
         if (filename === VSCODE_COMMAND_REQUEST_FILENAME) {
           void this.handleRequest();
@@ -46,6 +71,24 @@ export class VsCodeCommandBridge implements vscode.Disposable {
     } catch (err) {
       this.outputChannel.warn(
         `[vscode-command-bridge] Failed to watch ${this.dataDir}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Publish what this build is and can do. Rewritten on every start so a stale
+   * file from a previous host is replaced rather than believed.
+   */
+  private announce(): void {
+    try {
+      writeFileSync(
+        vsCodeCommandBridgeInfoPath(this.dataDir),
+        JSON.stringify(this.info) + '\n',
+        'utf-8',
+      );
+    } catch (err) {
+      this.outputChannel.warn(
+        `[vscode-command-bridge] Failed to announce: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -113,6 +156,13 @@ export class VsCodeCommandBridge implements vscode.Disposable {
     if (this.watcher) {
       this.watcher.close();
       this.watcher = null;
+    }
+    // Withdraw the announcement: a bridge that is gone must not look present.
+    try {
+      const path = vsCodeCommandBridgeInfoPath(this.dataDir);
+      if (existsSync(path)) unlinkSync(path);
+    } catch {
+      // The server also checks the announced pid, so a leftover file is caught.
     }
   }
 }

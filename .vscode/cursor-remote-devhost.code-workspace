@@ -1,0 +1,20 @@
+{
+  // Workspace for the Extension Development Host launched by the TestRunner task.
+  //
+  // Separate from cursor-remote-dev.code-workspace for one reason: the port.
+  // The installed release extension already owns 3002, and a second server that
+  // finds one running attaches as an observer instead of starting — so the dev
+  // build would load but never actually run its own relay.
+  "folders": [
+    {
+      "name": "cursor-ide-remote",
+      "path": ".."
+    }
+  ],
+  "settings": {
+    "cursorRemote.autoStart": true,
+    // The IDE being controlled is still the main Cursor instance, not this one.
+    "cursorRemote.cdpUrl": "http://127.0.0.1:19222",
+    "cursorRemote.serverPort": 3003
+  }
+}

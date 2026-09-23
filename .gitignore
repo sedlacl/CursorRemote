@@ -14,3 +14,5 @@ azure_token
 openvsx_token
 # marketing/
 .specstory/
+# Profile for the Extension Development Host launched by the TestRunner task
+.dev-host-profile/

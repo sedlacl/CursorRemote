@@ -2,6 +2,75 @@
   "version": "2.0.0",
   "tasks": [
     {
+      // Bound to F5. Rebuilds everything, then opens a Cursor window running
+      // this working copy as the extension.
+      //
+      // The rebuild is not optional: the extension host loads dist/, so without
+      // it F5 would silently launch the previous build — the failure mode is a
+      // command bridge that is "running" but does not know the newest commands.
+      "label": "TestRunner",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "CursorRemote: build all",
+        "CursorRemote: launch dev host"
+      ],
+      "problemMatcher": []
+    },
+    {
+      // `build` makes the web client (dist/client) and typechecks;
+      // `build:ext` makes dist/extension.cjs AND dist/server/bundle.mjs.
+      // Neither covers the other, so both have to run.
+      "label": "CursorRemote: build all",
+      "type": "shell",
+      "command": "npm run build && npm run build:ext",
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      // Launches a real Extension Development Host.
+      //
+      // `--user-data-dir` is what makes this work at all: without it, Cursor
+      // hands the arguments to the already-running instance and exits, so
+      // `--extensionDevelopmentPath` is silently dropped and no dev host
+      // appears. A distinct profile directory forces a separate process.
+      //
+      // The profile persists in .dev-host-profile/ (gitignored) so the license
+      // key and window layout survive between runs — a fresh profile each time
+      // would mean re-entering the key on every F5.
+      //
+      // `--disable-extension` keeps the installed release build out of this
+      // window; the extensions directory is shared even when the profile is not.
+      "label": "CursorRemote: launch dev host",
+      "type": "process",
+      "command": "${execPath}",
+      "args": [
+        "--user-data-dir=${workspaceFolder}/.dev-host-profile",
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--disable-extension=qjohn.cursor-remote",
+        "${workspaceFolder}/.vscode/cursor-remote-devhost.code-workspace"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          // Must be cleared. Anything spawned from inside an extension host
+          // inherits it, and with it set Cursor.exe starts as Node, which
+          // rejects every window flag with "bad option" and exits — no window,
+          // no error anyone sees.
+          "ELECTRON_RUN_AS_NODE": ""
+        }
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "CursorRemote: watch extension",
       "type": "npm",
       "script": "watch:ext",

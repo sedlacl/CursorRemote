@@ -171,12 +171,40 @@ with the Claude panel open. It never types, clicks, sends or runs a slash
 command, and it dumps DOM plus screenshots into gitignored `temp/`.
 
 ```bash
-npx tsx scripts/probe-claude-code.ts            # probe the Claude webview
-npx tsx scripts/probe-claude-code.ts --all-webviews   # dump every webview
+npm run probe:claude       # what the DOM actually contains
 ```
 
 Run it whenever the Claude Code extension version changes, then update
 `VERIFIED_VERSIONS` if — and only if — the value schema still matches.
+
+### Verifying the host end to end
+
+`scripts/verify-claude-host.ts` drives the real `ClaudeCodeHost` against the
+running IDE. It is read-only unless a flag says otherwise, because every action
+it can take is irreversible — `--send` posts a real message into a real session.
+
+```bash
+npm run verify:claude                          # connection, tabs, controls, background tasks
+npm run verify:claude -- --send "ping"         # sends for real
+npm run verify:claude -- --new-chat
+npm run verify:claude -- --switch 1            # tab index from the listing
+npm run verify:claude -- --stop
+npm run verify:claude -- --approve             # or --reject, while a prompt is pending
+```
+
+Anything routed through the extension command bridge (`--new-chat`, `--switch`,
+the diff actions) needs the CursorRemote extension running **this** build, via
+F5 "CursorRemote: Extension Dev Host". Without it those calls time out after 8 s
+and the script says why.
+
+Useful states to test in, because some controls only exist transiently:
+
+| To exercise | Put the session in this state |
+| --- | --- |
+| Stop | mid-turn — Stop replaces Send in the prompt box |
+| approve / reject | a tool permission prompt pending in the transcript |
+| multi-tab switching | open the session list so every session gets a real id |
+| both host surfaces | one Cursor chat and one Claude session open at once |
 
 ## 6. Out of scope
 

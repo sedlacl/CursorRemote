@@ -1,5 +1,14 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ExtensionFileBridge } from '../src/server/extension-file-bridge.js';
+import {
+  VSCODE_COMMAND_BRIDGE_PROTOCOL,
+  type VsCodeCommandBridgeInfo,
+} from '../src/shared/vscode-command-bridge.js';
 import { ChatHostRegistry } from '../src/server/hosts/chat-host-registry.js';
 import { BaseChatHost, NO_CAPABILITIES } from '../src/server/hosts/chat-host.js';
 import {
@@ -212,6 +221,59 @@ describe('Claude tab ids', () => {
     assert.equal(cleanSessionTitle('Claude code adapter implementacenow'), 'Claude code adapter implementace');
     assert.equal(cleanSessionTitle('Refactor parser2h'), 'Refactor parser');
     assert.equal(cleanSessionTitle('Plain title'), 'Plain title');
+  });
+});
+
+describe('Command bridge version check', () => {
+  const dir = join(tmpdir(), `claude-bridge-test-${randomUUID()}`);
+  const bridge = new ExtensionFileBridge(dir, {} as never);
+  const infoPath = join(dir, 'vscode-command-bridge-info.json');
+
+  const announce = (info: Partial<VsCodeCommandBridgeInfo>) => {
+    writeFileSync(infoPath, JSON.stringify({
+      protocol: VSCODE_COMMAND_BRIDGE_PROTOCOL,
+      extensionId: 'cursor-remote-dev.cursor-remote',
+      extensionVersion: '0.4.5',
+      commands: ['claude-vscode.editor.open'],
+      pid: process.pid,
+      startedAt: Date.now(),
+      ...info,
+    }), 'utf-8');
+  };
+
+  before(() => bridge.start());
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('names the directory when nothing announced itself', () => {
+    rmSync(infoPath, { force: true });
+    const problem = bridge.checkVsCodeBridge('claude-vscode.editor.open');
+    assert.match(problem ?? '', /No CursorRemote extension is watching/);
+    assert.ok(problem?.includes(dir), 'the error must name the directory that was watched');
+  });
+
+  it('accepts a live extension that supports the command', () => {
+    announce({});
+    assert.equal(bridge.checkVsCodeBridge('claude-vscode.editor.open'), null);
+  });
+
+  it('reports a protocol mismatch rather than letting it time out', () => {
+    announce({ protocol: VSCODE_COMMAND_BRIDGE_PROTOCOL + 1 });
+    assert.match(bridge.checkVsCodeBridge('claude-vscode.editor.open') ?? '', /protocol mismatch/);
+  });
+
+  it('reports an extension build that lacks the command', () => {
+    announce({ commands: ['claude-vscode.focus'] });
+    assert.match(
+      bridge.checkVsCodeBridge('claude-vscode.editor.open') ?? '',
+      /does not support claude-vscode\.editor\.open/,
+    );
+  });
+
+  it('detects an announcement left behind by a dead extension host', () => {
+    // pid 1 is never this machine's extension host; on Windows it is not a
+    // live pid at all, on POSIX it is init and unkillable by us.
+    announce({ pid: 999999998 });
+    assert.match(bridge.checkVsCodeBridge('claude-vscode.editor.open') ?? '', /no longer running/);
   });
 });
 

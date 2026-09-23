@@ -58,6 +58,29 @@ export function parseRemoteDebuggingPort(cdpUrl: string): number | null {
   }
 }
 
+export interface CdpProbeResponse {
+  ok: boolean;
+  json: () => Promise<unknown>;
+}
+
+/** True when `cdpUrl/json` returns a CDP target list. Connection failures count as off. */
+export async function isCdpEndpointListening(
+  cdpUrl: string,
+  fetchImpl: (url: string, init?: { signal?: AbortSignal }) => Promise<CdpProbeResponse>,
+  timeoutMs = 2000,
+): Promise<boolean> {
+  const base = cdpUrl.trim().replace(/\/+$/, '');
+  if (!base) return false;
+  try {
+    const resp = await fetchImpl(`${base}/json`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!resp.ok) return false;
+    const body = await resp.json();
+    return Array.isArray(body);
+  } catch {
+    return false;
+  }
+}
+
 /** Best-effort JSONC update of Cursor/VS Code `argv.json`. */
 export function upsertArgvRemoteDebuggingPort(raw: string, port: number): string {
   const trimmed = raw.trim();

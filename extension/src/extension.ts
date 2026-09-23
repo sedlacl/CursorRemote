@@ -8,6 +8,7 @@ import { StatusTreeView } from './tree-view.js';
 import { SetupPanel } from './setup-panel.js';
 import { GitStateBridge } from './git-state-bridge.js';
 import { VsCodeCommandBridge } from './vscode-command-bridge.js';
+import { promptRestartCursorIfCdpDown } from './cdp-restart-prompt.js';
 
 let serverManager: ServerManager | undefined;
 
@@ -108,6 +109,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   ensurePassword().catch(err => {
     outputChannel.warn(`Password auto-generation failed: ${err}`);
+  });
+
+  promptRestartCursorIfCdpDown(context, outputChannel).catch(err => {
+    outputChannel.warn(`[extension] CDP restart prompt failed: ${err}`);
   });
 
   const config = vscode.workspace.getConfiguration('cursorRemote');

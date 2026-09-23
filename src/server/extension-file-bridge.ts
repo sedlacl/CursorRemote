@@ -7,11 +7,14 @@ import type {
 } from '../shared/extension-bridge.js';
 import type { GitActionRequest, GitActionResult } from '../shared/git-scm.js';
 import type {
+  VsCodeCommandBridgeInfo,
   VsCodeCommandRequest,
   VsCodeCommandResult,
 } from '../shared/vscode-command-bridge.js';
 import {
+  VSCODE_COMMAND_BRIDGE_PROTOCOL,
   isVsCodeBridgeCommand,
+  vsCodeCommandBridgeInfoPath,
   vsCodeCommandRequestPath,
   vsCodeCommandResultPath,
 } from '../shared/vscode-command-bridge.js';
@@ -126,9 +129,66 @@ export class ExtensionFileBridge {
       };
     }
 
+    // Check the far end before writing a request nobody will read — otherwise
+    // a missing, stale or older extension all look the same: an 8 s silence.
+    const preflight = this.checkVsCodeBridge(request.command);
+    if (preflight) {
+      return {
+        requestId: request.requestId,
+        ok: false,
+        completedAt: Date.now(),
+        error: preflight,
+      };
+    }
+
     const task = this.vsCodeCommandChain.then(() => this.executeVsCodeCommand(request));
     this.vsCodeCommandChain = task.then(() => undefined, () => undefined);
     return task;
+  }
+
+  /**
+   * What the extension announced about itself, or null when nothing did.
+   * Also surfaced by the verify harness, so the state is inspectable before a
+   * command is ever attempted.
+   */
+  readVsCodeBridgeInfo(): VsCodeCommandBridgeInfo | null {
+    const path = vsCodeCommandBridgeInfoPath(this.dataDir);
+    if (!existsSync(path)) return null;
+
+    try {
+      const raw = readFileSync(path, 'utf-8').trim();
+      if (!raw) return null;
+      return JSON.parse(raw) as VsCodeCommandBridgeInfo;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Null when the bridge can run `command`; otherwise why it cannot. */
+  checkVsCodeBridge(command: string): string | null {
+    const info = this.readVsCodeBridgeInfo();
+    if (!info) {
+      return `No CursorRemote extension is watching ${this.dataDir}. `
+        + 'Start the extension (F5 "CursorRemote: Extension Dev Host") or point DATA_DIR '
+        + 'at the globalStorage directory of the extension that is running.';
+    }
+
+    if (!isProcessAlive(info.pid)) {
+      return `The extension that claimed ${this.dataDir} (${info.extensionId}@${info.extensionVersion}, `
+        + `pid ${info.pid}) is no longer running — its announcement is stale.`;
+    }
+
+    if (info.protocol !== VSCODE_COMMAND_BRIDGE_PROTOCOL) {
+      return `Command bridge protocol mismatch: server speaks ${VSCODE_COMMAND_BRIDGE_PROTOCOL}, `
+        + `${info.extensionId}@${info.extensionVersion} speaks ${info.protocol}. Rebuild and reload the extension.`;
+    }
+
+    if (Array.isArray(info.commands) && !info.commands.includes(command)) {
+      return `${info.extensionId}@${info.extensionVersion} does not support ${command}. `
+        + 'Rebuild (npm run build:ext) and reload the extension host.';
+    }
+
+    return null;
   }
 
   private async executeVsCodeCommand(request: VsCodeCommandRequest): Promise<VsCodeCommandResult> {
@@ -147,11 +207,15 @@ export class ExtensionFileBridge {
       await sleep(VSCODE_COMMAND_POLL_MS);
     }
 
+    // Preflight already established that a matching bridge is alive, so a
+    // timeout here means the command itself hung, not a setup problem.
+    const info = this.readVsCodeBridgeInfo();
+    const who = info ? `${info.extensionId}@${info.extensionVersion}` : 'the extension';
     return {
       requestId: request.requestId,
       ok: false,
       completedAt: Date.now(),
-      error: `Timed out waiting for extension to run ${request.command}`,
+      error: `Timed out waiting for ${who} to run ${request.command} (watching ${this.dataDir})`,
     };
   }
 
@@ -192,6 +256,18 @@ export class ExtensionFileBridge {
     } catch {
       return null;
     }
+  }
+}
+
+/** Signal 0 tests for existence without touching the process. */
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM means it exists but belongs to another user — still alive.
+    return (err as NodeJS.ErrnoException)?.code === 'EPERM';
   }
 }
 

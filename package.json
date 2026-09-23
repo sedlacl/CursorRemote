@@ -1,7 +1,7 @@
 {
   "name": "cursor-remote",
   "displayName": "QJohn CursorRemote (Dev)",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Remote control your local Cursor AI agent — monitor, approve, and send tasks from your phone or Telegram.",
   "publisher": "cursor-remote-dev",
   "repository": {
@@ -92,6 +92,11 @@
           "type": "string",
           "default": "http://127.0.0.1:9222",
           "markdownDescription": "Cursor's Chrome DevTools Protocol endpoint URL. Launch Cursor with `--remote-debugging-port=9222` to enable. See the [setup guide](https://github.com/len5ky/CursorRemote/blob/main/docs/setup-guide.md) for details."
+        },
+        "cursorRemote.promptRestartWithoutCdp": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When the extension starts and Cursor is not listening on the remote debugging port, ask whether to restart Cursor with CDP. Restart closes every Cursor window. Default is on."
         },
         "cursorRemote.serverPort": {
           "type": "number",
@@ -261,6 +266,8 @@
     "replay": "tsx scripts/replay-cdp.ts",
     "test": "npx tsx --test tests/*.test.ts",
     "probe": "tsx scripts/probe-cdp.ts",
+    "probe:claude": "tsx scripts/probe-claude-code.ts",
+    "verify:claude": "tsx scripts/verify-claude-host.ts",
     "wait-record": "tsx scripts/wait-record.ts",
     "--": "",
     "uu-safe-install": "npx uu-safe-install"

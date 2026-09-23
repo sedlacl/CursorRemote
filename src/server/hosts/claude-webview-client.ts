@@ -37,6 +37,15 @@ export interface ClaudeWebviewTarget {
   /** `webviewView` for the side panel; absent/other when opened as an editor tab. */
   purpose: string;
   view: ClaudeWebviewView;
+  /**
+   * Whether this surface is currently on screen.
+   *
+   * VS Code flips the webview document's `visibilityState` when a panel is
+   * hidden, which is the only signal that distinguishes the session the user is
+   * looking at from other sessions kept alive in the background. Without it a
+   * message can be typed into a session nobody is watching.
+   */
+  visible: boolean;
 }
 
 interface CDPTargetJson {
@@ -77,12 +86,25 @@ export function isNoFrame(result: unknown): boolean {
     && (result as { __noFrame?: boolean }).__noFrame === true;
 }
 
-/** Classifies the inner frame by what it actually renders. */
-const VIEW_PROBE_JS = inPanel(`(d) => {
-  if (d.querySelector('[role="textbox"][aria-label="Message input"]')) return 'chat';
-  if (d.querySelector('[id^="sessions-list-row-"]')) return 'session-list';
-  return 'unknown';
-}`);
+/**
+ * Classifies the inner frame by what it renders, and reports whether the
+ * surface is on screen. Visibility is read from the outer shell document,
+ * because that is what the webview host toggles.
+ */
+const VIEW_PROBE_JS = `
+  (() => {
+    const visible = document.visibilityState === 'visible';
+    const f = document.getElementById('active-frame');
+    const d = f && f.contentDocument;
+    if (!d) return { view: 'unknown', visible: visible };
+    if (d.querySelector('[role="textbox"][aria-label="Message input"]')) return { view: 'chat', visible: visible };
+    if (d.querySelector('[id^="sessions-list-row-"]')) return { view: 'session-list', visible: visible };
+    return { view: 'unknown', visible: visible };
+  })()
+`;
+
+/** Is the connected surface still the one on screen? */
+const VISIBILITY_JS = `document.visibilityState === 'visible'`;
 
 export class ClaudeWebviewClient {
   private readonly cdpUrl: string;
@@ -146,7 +168,7 @@ export class ClaudeWebviewClient {
 
     const found: ClaudeWebviewTarget[] = [];
     for (const candidate of candidates) {
-      const view = await this.classify(candidate.webSocketDebuggerUrl!);
+      const { view, visible } = await this.classify(candidate.webSocketDebuggerUrl!);
       found.push({
         id: candidate.id,
         url: candidate.url,
@@ -154,25 +176,45 @@ export class ClaudeWebviewClient {
         webviewName: parseQueryParam(candidate.url, 'id'),
         purpose: parseQueryParam(candidate.url, 'purpose'),
         view,
+        visible,
       });
     }
 
-    // Chat views first — that is what commands need.
-    found.sort((a, b) => viewRank(a.view) - viewRank(b.view));
+    // Visible chat surfaces first: commands must reach the session the user is
+    // actually looking at, not whichever one the CDP listing happened to place
+    // first. Several Claude sessions stay alive as background targets.
+    found.sort((a, b) => targetRank(a) - targetRank(b));
     this.knownTargets = found;
     return found;
   }
 
-  private async classify(wsUrl: string): Promise<ClaudeWebviewView> {
+  private async classify(wsUrl: string): Promise<{ view: ClaudeWebviewView; visible: boolean }> {
     const probe = new CdpClient();
     try {
       await probe.connect(wsUrl, 4000);
-      const view = await probe.evaluate(VIEW_PROBE_JS, 6000);
-      return view === 'chat' || view === 'session-list' ? view : 'unknown';
+      const raw = (await probe.evaluate(VIEW_PROBE_JS, 6000)) as
+        | { view?: string; visible?: boolean }
+        | null;
+      const view = raw?.view === 'chat' || raw?.view === 'session-list' ? raw.view : 'unknown';
+      return { view, visible: raw?.visible === true };
     } catch {
-      return 'unknown';
+      return { view: 'unknown', visible: false };
     } finally {
       probe.disconnect();
+    }
+  }
+
+  /**
+   * Whether the connected surface is still on screen. False also when the
+   * connection is gone, so callers can treat it as "re-discover".
+   */
+  async isTargetVisible(): Promise<boolean> {
+    const client = this.getClient();
+    if (!client) return false;
+    try {
+      return (await client.evaluate(VISIBILITY_JS, 4000)) === true;
+    } catch {
+      return false;
     }
   }
 
@@ -184,7 +226,10 @@ export class ClaudeWebviewClient {
     let chosen = target ?? null;
     if (!chosen) {
       const found = await this.discover();
-      chosen = found.find(t => t.view === 'chat') ?? found[0] ?? null;
+      chosen = found.find(t => t.view === 'chat' && t.visible)
+        ?? found.find(t => t.view === 'chat')
+        ?? found[0]
+        ?? null;
     }
     if (!chosen) {
       this.disconnect();
@@ -214,7 +259,8 @@ export class ClaudeWebviewClient {
     this.client = client;
     this.target = chosen;
     console.log(
-      `[claude-webview] Connected to ${chosen.id.slice(0, 8)} (view=${chosen.view}, purpose=${chosen.purpose || 'editor'})`,
+      `[claude-webview] Connected to ${chosen.id.slice(0, 8)} `
+      + `(view=${chosen.view}, visible=${chosen.visible}, purpose=${chosen.purpose || 'editor'})`,
     );
     return true;
   }
@@ -302,8 +348,11 @@ export class ClaudeWebviewClient {
   }
 }
 
-function viewRank(view: ClaudeWebviewView): number {
-  return view === 'chat' ? 0 : view === 'session-list' ? 1 : 2;
+/** Lower sorts first: visible chat, hidden chat, session list, anything else. */
+function targetRank(target: ClaudeWebviewTarget): number {
+  if (target.view === 'chat') return target.visible ? 0 : 1;
+  if (target.view === 'session-list') return target.visible ? 2 : 3;
+  return 4;
 }
 
 function parseQueryParam(url: string, name: string): string {

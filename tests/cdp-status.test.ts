@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   classifyCdpFailure,
+  isCdpEndpointListening,
   parseRemoteDebuggingPort,
   upsertArgvRemoteDebuggingPort,
 } from '../src/shared/cdp-status.js';
+import { shouldOfferCdpRestart } from '../src/shared/cdp-restart-prompt.js';
 import {
   argvJsonPathFromGlobalStorage,
   resolveCursorExecutablePath,
@@ -87,6 +89,50 @@ describe('cdp status', () => {
       exe,
       'C:\\Users\\me\\AppData\\Local\\Programs\\cursor\\Cursor.exe',
     );
+  });
+});
+
+describe('CDP restart prompt', () => {
+  it('treats a target list as listening and failures as off', async () => {
+    const up = await isCdpEndpointListening('http://127.0.0.1:9222/', async () => ({
+      ok: true,
+      json: async () => [{ type: 'page' }],
+    }));
+    assert.equal(up, true);
+
+    const down = await isCdpEndpointListening('http://127.0.0.1:9222', async () => {
+      throw Object.assign(new Error('fetch failed'), { code: 'ECONNREFUSED' });
+    });
+    assert.equal(down, false);
+
+    const notCdp = await isCdpEndpointListening('http://127.0.0.1:9222', async () => ({
+      ok: true,
+      json: async () => ({ status: 'ok' }),
+    }));
+    assert.equal(notCdp, false);
+  });
+
+  it('asks only when the setting is on, CDP is down, and this launch has not asked yet', () => {
+    assert.equal(shouldOfferCdpRestart({
+      promptEnabled: true,
+      cdpListening: false,
+      alreadyClaimedThisLaunch: false,
+    }), true);
+    assert.equal(shouldOfferCdpRestart({
+      promptEnabled: false,
+      cdpListening: false,
+      alreadyClaimedThisLaunch: false,
+    }), false);
+    assert.equal(shouldOfferCdpRestart({
+      promptEnabled: true,
+      cdpListening: true,
+      alreadyClaimedThisLaunch: false,
+    }), false);
+    assert.equal(shouldOfferCdpRestart({
+      promptEnabled: true,
+      cdpListening: false,
+      alreadyClaimedThisLaunch: true,
+    }), false);
   });
 });
 

@@ -52,6 +52,35 @@ export interface VsCodeCommandResult {
 
 export const VSCODE_COMMAND_REQUEST_FILENAME = 'vscode-command-request.json';
 export const VSCODE_COMMAND_RESULT_FILENAME = 'vscode-command-result.json';
+export const VSCODE_COMMAND_BRIDGE_INFO_FILENAME = 'vscode-command-bridge-info.json';
+
+/**
+ * Wire version of this handshake.
+ *
+ * Bumped whenever the request/result shape changes in a way an older peer would
+ * misread. The server compares it against what the extension announces, so a
+ * version mismatch is reported as such instead of surfacing as a timeout.
+ */
+export const VSCODE_COMMAND_BRIDGE_PROTOCOL = 1;
+
+/**
+ * Written by the extension when its bridge starts watching, read by the server
+ * to answer one question precisely: is anything on the other end, and can it do
+ * what we are about to ask?
+ *
+ * Without it, an extension that is missing, outdated, or built without the
+ * bridge all look identical from the server — an 8 s silence.
+ */
+export interface VsCodeCommandBridgeInfo {
+  protocol: number;
+  extensionId: string;
+  extensionVersion: string;
+  /** Commands this build will actually execute. */
+  commands: string[];
+  /** Extension host pid, so a leftover file from a dead host is detectable. */
+  pid: number;
+  startedAt: number;
+}
 
 export function vsCodeCommandRequestPath(dataDir: string): string {
   return join(dataDir, VSCODE_COMMAND_REQUEST_FILENAME);
@@ -59,4 +88,8 @@ export function vsCodeCommandRequestPath(dataDir: string): string {
 
 export function vsCodeCommandResultPath(dataDir: string): string {
   return join(dataDir, VSCODE_COMMAND_RESULT_FILENAME);
+}
+
+export function vsCodeCommandBridgeInfoPath(dataDir: string): string {
+  return join(dataDir, VSCODE_COMMAND_BRIDGE_INFO_FILENAME);
 }
