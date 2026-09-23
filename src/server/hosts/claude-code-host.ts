@@ -57,6 +57,24 @@ const SURFACE_META_JS = `(d) => {
       .find(c => chrome.indexOf(c.label) === -1);
     title = titled ? titled.label : '';
   }
+  if (!title) {
+    // Editor tabs have no header row; the title Cursor shows on the tab is
+    // the session's summary signal.
+    outer: for (const el of d.querySelectorAll('*')) {
+      const key = Object.keys(el).find(k => k.startsWith('__reactFiber'));
+      let fiber = key ? el[key] : null;
+      for (let i = 0; i < 30 && fiber; i++, fiber = fiber.return) {
+        const s = fiber.memoizedProps && fiber.memoizedProps.session;
+        // lastConfirmedSessionId marks the chat's own session, not a
+        // session-manager row.
+        const summary = s && s.lastConfirmedSessionId && s.summary && s.summary.value;
+        if (typeof summary === 'string' && summary.trim()) {
+          title = summary.trim();
+          break outer;
+        }
+      }
+    }
+  }
   const modelBtn = Array.from(d.querySelectorAll('button, [role="button"]')).find(el =>
     /opus|sonnet|haiku|switch model/i.test(((el.getAttribute('aria-label') || '') + ' ' + (el.innerText || '')))
   );
