@@ -10,6 +10,7 @@ import {
   getVisibleBackgroundTasks,
   getVisibleGitStatus,
 } from '../../view-models/backgroundTasks.js';
+import { hostCan } from '../../view-models/hostCapabilities.js';
 import { newCommandId } from '../../utils/commandIds.js';
 import { applySkillSlashToken, parseSkillSlashQuery } from '../../utils/skillSlashQuery.js';
 import {
@@ -82,6 +83,10 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
   const inputDisabled = !state.inputAvailable;
   const canSend = !inputDisabled && (text.trim().length > 0 || attachments.length > 0);
   const currentMode = modeUi(state.mode?.current);
+  // Mode and model belong to the active tab's backend. A pill for a control the
+  // backend lacks would change another backend's composer, so it is not shown.
+  const canSetMode = hostCan(state, 'setMode');
+  const canSetModel = hostCan(state, 'setModel');
   const backgroundTasks = getVisibleBackgroundTasks(state);
   const backgroundTaskCount = getBackgroundTaskCount(backgroundTasks);
   const gitStatus = getVisibleGitStatus(state);
@@ -258,14 +263,22 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
         onDismiss={dismissSkillPicker}
       />
       <div id="mode-model-bar" className="mode-model-bar">
-        <button id="pill-mode" className="pill" aria-label="Select mode" onClick={() => ui.openSheet('mode')}>
-          <span id="pill-mode-icon" className="pill-icon"><ModeIcon modeId={currentMode.id} size={14} /></span>
-          <span id="pill-mode-text">{currentMode.label}</span>
-          <span className="pill-chevron">&#9662;</span>
-        </button>
-        <button id="pill-model" className="pill" aria-label="Select model" onClick={() => ui.openSheet('model')}>
+        {canSetMode && (
+          <button id="pill-mode" className="pill" aria-label="Select mode" onClick={() => ui.openSheet('mode')}>
+            <span id="pill-mode-icon" className="pill-icon"><ModeIcon modeId={currentMode.id} size={14} /></span>
+            <span id="pill-mode-text">{currentMode.label}</span>
+            <span className="pill-chevron">&#9662;</span>
+          </button>
+        )}
+        <button
+          id="pill-model"
+          className="pill"
+          aria-label={canSetModel ? 'Select model' : 'Model'}
+          disabled={!canSetModel}
+          onClick={() => ui.openSheet('model')}
+        >
           <span id="pill-model-text">{state.model?.current || 'Auto'}</span>
-          <span className="pill-chevron">&#9662;</span>
+          {canSetModel && <span className="pill-chevron">&#9662;</span>}
         </button>
         <button
           id="pill-skill"

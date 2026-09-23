@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CommandResult, ComposerQueueItem, CursorState, PlanBlock } from '../../server/types.js';
 import type { GitFileSummary } from '../../shared/git-scm.js';
 import { CursorRemoteShell } from '../components/layout/CursorRemoteShell.js';
@@ -7,6 +7,7 @@ import { defaultCursorState, mergeCursorPatch, RemoteStateContext } from '../sta
 import { checkAuth, clearAuthToken, createSocket, type SocketLike } from '../state/socketClient.js';
 import { UiStateContext, type SheetType, type ToastMessage } from '../state/uiState.js';
 import { newCommandId } from '../utils/commandIds.js';
+import { activeHostOf } from '../view-models/hostCapabilities.js';
 
 interface AppProps {
   socket?: SocketLike;
@@ -15,10 +16,13 @@ interface AppProps {
 
 export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
   const socket = useMemo(() => providedSocket ?? createSocket(), [providedSocket]);
-  const commandClient = useCreateCommandClient(socket);
   const [authReady, setAuthReady] = useState(skipAuth);
   const [socketConnected, setSocketConnected] = useState(socket.connected !== false);
   const [remoteState, setRemoteState] = useState<CursorState>(defaultCursorState);
+  // Only a server that publishes `activeHost` can check the stamp.
+  const activeHostRef = useRef<CursorState['activeHost']>(undefined);
+  activeHostRef.current = remoteState.activeHost ? activeHostOf(remoteState) : undefined;
+  const commandClient = useCreateCommandClient(socket, () => activeHostRef.current);
   const [activeSheet, setActiveSheet] = useState<SheetType>(null);
   const [queueSheetItem, setQueueSheetItem] = useState<ComposerQueueItem | null>(null);
   const [tabSheetComposerId, setTabSheetComposerId] = useState<string | null>(null);

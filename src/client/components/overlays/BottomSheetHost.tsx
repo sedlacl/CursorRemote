@@ -2,6 +2,7 @@ import React from 'react';
 import type { CursorState } from '../../../server/types.js';
 import type { HealthSnapshot } from '../../state/serverHealth.js';
 import { useUiState } from '../../state/uiState.js';
+import { hostCan } from '../../view-models/hostCapabilities.js';
 import { BackgroundTasksSheet } from './sheets/BackgroundTasksSheet.js';
 import { DebugSheet } from './sheets/DebugSheet.js';
 import { ModeSheet } from './sheets/ModeSheet.js';
@@ -30,9 +31,10 @@ export function BottomSheetHost({
   return (
     <>
       <div id="sheet-overlay" className={`sheet-overlay ${active ? '' : 'hidden'}`} onClick={ui.closeSheet} />
-      <ModeSheet state={state} visible={active === 'mode'} />
-      <ModelSheet state={state} visible={active === 'model'} />
-      <PlanModelSheet visible={active === 'plan-model'} />
+      {/* A sheet left open across a switch to a backend without the control closes itself. */}
+      <ModeSheet state={state} visible={active === 'mode' && hostCan(state, 'setMode')} />
+      <ModelSheet state={state} visible={active === 'model' && hostCan(state, 'setModel')} />
+      <PlanModelSheet visible={active === 'plan-model' && hostCan(state, 'planModel')} />
       <TabActionsSheet state={state} visible={active === 'tab'} />
       <QueueActionsSheet visible={active === 'queue'} />
       <BackgroundTasksSheet state={state} visible={active === 'background-tasks'} />

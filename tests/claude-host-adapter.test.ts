@@ -10,7 +10,12 @@ import {
   type VsCodeCommandBridgeInfo,
 } from '../src/shared/vscode-command-bridge.js';
 import { ChatHostRegistry } from '../src/server/hosts/chat-host-registry.js';
-import { BaseChatHost, NO_CAPABILITIES } from '../src/server/hosts/chat-host.js';
+import {
+  BaseChatHost,
+  NO_CAPABILITIES,
+  type HostConversationView,
+} from '../src/server/hosts/chat-host.js';
+import { StateManager } from '../src/server/state-manager.js';
 import {
   outcomeToTasks,
   readBackgroundTasks,
@@ -27,7 +32,7 @@ import {
   parseSessionId,
 } from '../src/server/hosts/claude-code-host.js';
 import { claudeTargetRank } from '../src/server/hosts/claude-webview-client.js';
-import type { ChatHostId, ChatTab, CommandResult } from '../src/server/types.js';
+import type { ChatHostId, ChatTab, CommandResult, CursorState } from '../src/server/types.js';
 
 function tab(overrides: Partial<ChatTab> & { composerId: string }): ChatTab {
   return {
@@ -44,6 +49,7 @@ function tab(overrides: Partial<ChatTab> & { composerId: string }): ChatTab {
 class FakeHost extends BaseChatHost {
   readonly capabilities = { ...NO_CAPABILITIES };
   readonly calls: string[] = [];
+  view: HostConversationView | null = {};
   private available = true;
 
   constructor(readonly id: ChatHostId, private tabs: ChatTab[] = []) {
@@ -66,6 +72,23 @@ class FakeHost extends BaseChatHost {
     this.calls.push('newChat');
     return Promise.resolve({ commandId, ok: true });
   }
+
+  override conversationView(): HostConversationView | null {
+    return this.id === 'cursor' ? null : this.view;
+  }
+}
+
+/** An extraction of the Cursor composer: two tabs, Plan mode, a live stop control. */
+function extracted(): CursorState {
+  return {
+    ...(new StateManager(0).getCurrentState()),
+    chatTabs: [tab({ composerId: 'a', isActive: true }), tab({ composerId: 'b' })],
+    activeComposerId: 'a',
+    mode: { current: 'plan', available: [] },
+    model: { current: 'GPT-5 Codex', currentId: 'codex' },
+    questionnaire: { questions: [] } as unknown as CursorState['questionnaire'],
+    agentStopSelectorPath: 'div > button.stop',
+  };
 }
 
 // ─── routing contract ───
@@ -92,46 +115,75 @@ describe('ChatHostRegistry routing', () => {
 
   it('sends tab-less commands to the host of the tab the user switched to', () => {
     const registry = new ChatHostRegistry();
-    const cursor = new FakeHost('cursor', [tab({ composerId: 'a', isActive: true })]);
-    const claude = new FakeHost('claude-code', [tab({ composerId: 'claude:x', host: 'claude-code' })]);
-    registry.register(cursor);
-    registry.register(claude);
+    registry.register(new FakeHost('cursor', [tab({ composerId: 'a', isActive: true })]));
+    registry.register(new FakeHost('claude-code', [tab({ composerId: 'claude:x', host: 'claude-code' })]));
 
-    assert.equal(registry.forActiveTab(cursor.listTabs())?.id, 'cursor');
+    assert.equal(registry.activeHost().id, 'cursor');
 
     registry.setActiveHost('claude-code');
-    assert.equal(registry.forActiveTab(cursor.listTabs())?.id, 'claude-code');
+    assert.equal(registry.activeHost().id, 'claude-code');
   });
 
-  it('falls back to the DOM-active tab when the recorded host is unavailable', () => {
+  it('falls back to the primary host when the recorded host is unavailable', () => {
     const registry = new ChatHostRegistry();
-    const cursor = new FakeHost('cursor', [tab({ composerId: 'a', isActive: true })]);
-    const claude = new FakeHost('claude-code');
-    registry.register(cursor);
+    registry.register(new FakeHost('cursor', [tab({ composerId: 'a', isActive: true })]));
+    const claude = new FakeHost('claude-code', [tab({ composerId: 'claude:x', host: 'claude-code' })]);
     registry.register(claude);
 
     // Panel closed since the switch — commands must not vanish into a dead host.
     registry.setActiveHost('claude-code');
     claude.setAvailable(false);
-    assert.equal(registry.forActiveTab(cursor.listTabs())?.id, 'cursor');
+    assert.equal(registry.activeHost().id, 'cursor');
   });
 
-  it('merges Claude tabs after Cursor tabs with exactly one active', () => {
+  it('merges foreign tabs after the primary tabs with exactly one active', () => {
     const registry = new ChatHostRegistry();
-    registry.register(new FakeHost('cursor', [
-      tab({ composerId: 'a', isActive: true }),
-      tab({ composerId: 'b' }),
-    ]));
+    registry.register(new FakeHost('cursor'));
     registry.register(new FakeHost('claude-code', [
       tab({ composerId: 'claude:x', host: 'claude-code' }),
     ]));
 
     registry.setActiveHost('claude-code');
-    const merged = registry.mergeTabs();
+    const merged = registry.composeState(extracted()).chatTabs;
 
     assert.deepEqual(merged.map(t => t.composerId), ['a', 'b', 'claude:x']);
     assert.equal(merged.filter(t => t.isActive).length, 1);
     assert.equal(merged.find(t => t.isActive)?.host, 'claude-code');
+  });
+
+  // Regression: Plan chosen on a Claude tab switched the Cursor composer beside
+  // it, because mode was Cursor's and set_mode went to the Cursor executor.
+  it('never publishes the primary host conversation on another host tab', () => {
+    const registry = new ChatHostRegistry();
+    registry.register(new FakeHost('cursor'));
+    const claude = new FakeHost('claude-code', [
+      tab({ composerId: 'claude:x', host: 'claude-code', isActive: true }),
+    ]);
+    claude.view = { composerId: 'claude:x', model: { current: 'Opus', currentId: 'claude' } };
+    registry.register(claude);
+
+    registry.setActiveHost('claude-code');
+    const state = registry.composeState(extracted());
+
+    assert.equal(state.activeHost, 'claude-code');
+    assert.equal(state.activeComposerId, 'claude:x');
+    assert.equal(state.mode.current, '');
+    assert.equal(state.model.current, 'Opus');
+    assert.equal(state.questionnaire, null);
+    assert.equal(state.agentStopSelectorPath, '');
+    assert.equal(state.hostCapabilities?.setMode, false);
+  });
+
+  it('refuses a command issued from a tab of a host that is no longer active', () => {
+    const registry = new ChatHostRegistry();
+    registry.register(new FakeHost('cursor'));
+    registry.register(new FakeHost('claude-code', [tab({ composerId: 'claude:x', host: 'claude-code' })]));
+
+    registry.setActiveHost('claude-code');
+    assert.match(registry.checkActiveHost('cursor') ?? '', /command not sent/);
+    assert.equal(registry.checkActiveHost('claude-code'), null);
+    // Clients that predate the stamp are not refused.
+    assert.equal(registry.checkActiveHost(undefined), null);
   });
 
   it('answers unsupported operations with an error instead of throwing', async () => {

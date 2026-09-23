@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useRef } from 'react';
-import type { CommandResult } from '../../server/types.js';
+import type { ChatHostId, CommandResult } from '../../server/types.js';
 import type { SocketLike } from './socketClient.js';
 import { newCommandId } from '../utils/commandIds.js';
 
@@ -20,12 +20,27 @@ export function useCommandClient(): CommandClient {
   return client;
 }
 
-export function useCreateCommandClient(socket: SocketLike): CommandClient {
+/**
+ * @param getActiveHost backend of the tab on screen. Every command is stamped
+ *   with it so the server can refuse one that would reach a different backend
+ *   than the user is looking at (the tab changed between tap and delivery).
+ */
+export function useCreateCommandClient(
+  socket: SocketLike,
+  getActiveHost: () => ChatHostId | undefined = () => undefined,
+): CommandClient {
   const pendingRef = useRef(new Map<string, PendingResolver>());
+  const getActiveHostRef = useRef(getActiveHost);
+  getActiveHostRef.current = getActiveHost;
+
+  const stamp = useCallback((payload: Record<string, unknown>): Record<string, unknown> => {
+    const activeHost = getActiveHostRef.current();
+    return activeHost ? { activeHost, ...payload } : payload;
+  }, []);
 
   const emit = useCallback((eventName: string, payload: Record<string, unknown> = {}) => {
-    socket.emit(eventName, { commandId: newCommandId(), ...payload });
-  }, [socket]);
+    socket.emit(eventName, { commandId: newCommandId(), ...stamp(payload) });
+  }, [socket, stamp]);
 
   const sendCommandAwaitResult = useCallback((
     eventName: string,
@@ -43,9 +58,9 @@ export function useCreateCommandClient(socket: SocketLike): CommandClient {
         resolve(result);
       });
 
-      socket.emit(eventName, { commandId, ...payload });
+      socket.emit(eventName, { commandId, ...stamp(payload) });
     });
-  }, [socket]);
+  }, [socket, stamp]);
 
   const resolveCommandResult = useCallback((result: CommandResult): boolean => {
     const pending = pendingRef.current.get(result.commandId);

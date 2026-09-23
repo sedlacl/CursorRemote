@@ -250,6 +250,14 @@ export interface CursorState {
   agentStopSource: 'composer' | 'background_task' | 'none';
   /** Optional exploratory chrome (sticky title, cloud widgets, subagent trays). */
   exploratoryUi: ExploratoryUiChrome | null;
+  /**
+   * Backend behind the active tab. Every conversation-scoped field above
+   * (messages, mode, model, stop, approvals, …) describes this host only.
+   * Absent on states published before the multi-host seam — read as `cursor`.
+   */
+  activeHost?: ChatHostId;
+  /** What {@link activeHost} can do; the client hides controls it lacks. */
+  hostCapabilities?: ChatHostCapabilities;
   _rawSignals?: RawSignals;
 }
 
@@ -263,6 +271,42 @@ export type ChatTabWorkStatus = 'running' | 'completed' | 'idle';
  * layer so state types do not depend on the adapter implementations.
  */
 export type ChatHostId = 'cursor' | 'claude-code';
+
+/**
+ * What a chat host can actually do right now.
+ *
+ * Declared per host rather than probed at call time so the UI can hide or
+ * disable controls instead of firing commands that will fail. Everything a
+ * probe has not confirmed stays `false` — fail closed.
+ */
+export interface ChatHostCapabilities {
+  sendMessage: boolean;
+  newChat: boolean;
+  switchTab: boolean;
+  closeTab: boolean;
+  /** Approve/reject a tool permission prompt inside the chat transcript. */
+  chatApproval: boolean;
+  /** One-click "approve all" for every pending prompt. */
+  approveAll: boolean;
+  /** Accept/reject a proposed diff in the editor (not in the transcript). */
+  editorDiff: boolean;
+  /** Interrupt the main turn. */
+  stopTurn: boolean;
+  /** Host can enumerate background tasks. */
+  backgroundTasks: boolean;
+  /** Host can stop an individual background task. */
+  stopBackgroundTask: boolean;
+  setMode: boolean;
+  setModel: boolean;
+  /** Plan widget's own model picker. */
+  planModel: boolean;
+  /** Click a host-owned control by the selector path published in state. */
+  clickAction: boolean;
+  /** Load older transcript messages on demand. */
+  loadHistory: boolean;
+  /** Open / stop / return from subagent conversations. */
+  subagents: boolean;
+}
 
 export interface ChatTab {
   composerId: string;
@@ -560,6 +604,12 @@ export interface CommandPayload {
   windowId?: string;
   /** Stable subagent id from extracted state (`subagents.items[].id`). */
   subagentId?: string;
+  /**
+   * Host of the tab the client was showing when it issued the command. The
+   * relay refuses a host-routed command when this no longer matches the
+   * active host, so a tap never lands in another backend's composer.
+   */
+  activeHost?: ChatHostId;
 }
 
 export interface CommandResult {

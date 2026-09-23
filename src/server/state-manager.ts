@@ -495,6 +495,10 @@ export class StateManager extends EventEmitter {
 
   /** Push per-window mode/model into global state (e.g. from a cached snapshot on window switch). */
   updateModeModel(mode: CursorState['mode'], model: CursorState['model']): void {
+    // The cached values are the Cursor composer's. While another host's tab is
+    // active, mode/model describe that host and must not be overwritten.
+    const activeHost = this.currentState.activeHost ?? 'cursor';
+    if (activeHost !== 'cursor') return;
     const modeChanged = this.currentState.mode?.current !== mode?.current;
     const modelChanged = this.currentState.model?.current !== model?.current
       || this.currentState.model?.currentId !== model?.currentId;
@@ -741,6 +745,16 @@ export class StateManager extends EventEmitter {
 
     if (JSON.stringify(prev.model) !== JSON.stringify(next.model)) {
       patch.model = next.model;
+      hasChange = true;
+    }
+
+    if (prev.activeHost !== next.activeHost) {
+      patch.activeHost = next.activeHost;
+      hasChange = true;
+    }
+
+    if (JSON.stringify(prev.hostCapabilities) !== JSON.stringify(next.hostCapabilities)) {
+      patch.hostCapabilities = next.hostCapabilities;
       hasChange = true;
     }
 

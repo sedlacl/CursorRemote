@@ -2463,7 +2463,7 @@ header {
 }
 
 /* Header tone while a Claude Code tab is active — no new layout, just accent. */
-#header.header--claude {
+#header.header--claude-code {
   background: linear-gradient(
     to bottom,
     rgba(217, 119, 87, 0.10),

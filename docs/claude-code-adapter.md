@@ -7,44 +7,90 @@ sessions appear as extra chips in the existing tab bar — there is no
 
 ## 1. The adapter seam
 
-Everything chat-shaped goes through `ChatHost` ([src/server/hosts/chat-host.ts](../src/server/hosts/chat-host.ts)):
+Everything chat-shaped goes through `ChatHost` ([src/server/hosts/chat-host.ts](../src/server/hosts/chat-host.ts)),
+and `ChatHostRegistry` ([chat-host-registry.ts](../src/server/hosts/chat-host-registry.ts))
+decides which host a command or a published state belongs to:
 
 ```
-                 ┌────────────────────┐
-  relay ────────→│ ChatHostRegistry   │  routes by tab.host
-                 └─────────┬──────────┘
-                           │
-              ┌────────────┴────────────┐
-              ▼                         ▼
-      ┌───────────────┐        ┌──────────────────┐
-      │  CursorHost   │        │ ClaudeCodeHost   │
-      │ CDP workbench │        │ CDP webview +    │
-      │ DOM extractor │        │ VS Code commands │
-      └───────────────┘        └──────────────────┘
+  client ──command {activeHost}──→ relay.runOnHost()
+                                     │ 1. stamp == active host?   else refuse
+                                     │ 2. host.capabilities[cap]? else unsupported
+                                     ▼
+                           ┌────────────────────┐
+  extractor tick ────────→ │ ChatHostRegistry   │ ──composeState()──→ state:patch
+                           └─────────┬──────────┘
+              ┌──────────────────────┼──────────────────────┐
+              ▼                      ▼                      ▼
+      ┌───────────────┐     ┌──────────────────┐    ┌──────────────┐
+      │  CursorHost   │     │ ClaudeCodeHost   │    │ (next host,  │
+      │  primary      │     │ CDP webview +    │    │  e.g. Codex) │
+      │  DOM extractor│     │ VS Code commands │    │              │
+      └───────────────┘     └──────────────────┘    └──────────────┘
 ```
 
-- `CursorHost` is pure delegation to today's `CommandExecutor` and DOM
-  extractor — behaviour is unchanged.
-- `ClaudeCodeHost` holds a **second** `CdpClient` on the Claude webview target
-  and calls whitelisted `claude-vscode.*` commands through the extension.
-- The relay never branches on a host id. It asks the registry for the host that
-  owns the target tab (`switch_tab`, `send_message`) or the active tab
-  (`new_chat`, `stop`), and `BaseChatHost` turns anything a host cannot do into
-  an ordinary command error instead of an exception.
+Three rules keep backends from bleeding into each other:
 
-`ChatTab.host` is optional and absent means `cursor`, so tabs extracted before
-this feature existed keep routing exactly as before.
+1. **One active host, one conversation.** The registry records the host of the
+   tab the user last switched to. `composeState()` publishes `activeHost` and
+   `hostCapabilities`, and every conversation-scoped field (`messages`, `mode`,
+   `model`, stop, approvals, questionnaire, queue, subagents, …; see
+   `ConversationStateKey`) describes that host only. The primary host (Cursor)
+   is native to the extraction and publishes no view. Any other host starts
+   from `neutralConversationState()` and overlays its own
+   `conversationView()`, so none of Cursor's fields survive on its tab.
+2. **Every chat command goes through `runOnHost()`.** The relay resolves the
+   host (by the target tab for `switch_tab` / `close_tab`, else the active
+   host), checks the capability and calls the host method. It never calls a
+   backend executor for a chat command and never branches on a host id.
+   Cursor-only details live in `CursorHost`: approval selectors from the
+   extracted registry, and history paging from the storage DB.
+3. **Commands carry the host they were issued from.** The web client stamps
+   every command with `activeHost`. When that no longer matches the server's
+   active host, for example because the tab changed between the tap and the
+   delivery, the relay refuses the command instead of running it on the other
+   backend.
+
+The client hides controls the active host lacks: the mode pill without
+`setMode`, and the model sheet without `setModel`
+([hostCapabilities.ts](../src/client/view-models/hostCapabilities.ts)).
+
+Workflows built on the primary host's extracted state are subagents,
+return-to-parent and transcript links. They run only while a primary-host tab
+is active (`refuseUnlessPrimary`). `navigate_to_approval` and `return_to_parent`
+land on a Cursor tab, so they make Cursor the active host again.
+
+`ChatTab.host` is optional and absent means the primary host. Tabs extracted
+before this feature existed keep routing exactly as before.
 
 ### Routing table
 
-| Command | Cursor | Claude Code |
-| --- | --- | --- |
-| `send_message` | composer CDP (unchanged) | `Input.insertText` + Enter into the webview contenteditable |
-| `new_chat` | composer CDP new chat | `claude-vscode.newConversation` |
-| `switch_tab` | `switchTab` (unchanged) | `claude-vscode.editor.open(sessionId)` |
-| `approve` / `reject` | selector path from the approval registry | click the live permission control in the webview DOM |
-| `stop` | stop selector from extracted state | visible Stop in the prompt box |
-| accept / reject diff | in-transcript (unchanged) | `claude-vscode.acceptProposedDiff` / `rejectProposedDiff` |
+| Command | Capability | Cursor | Claude Code |
+| --- | --- | --- | --- |
+| `send_message` | `sendMessage` | composer CDP | `Input.insertText` + Enter into the webview contenteditable |
+| `new_chat` | `newChat` | composer CDP new chat | `claude-vscode.newConversation` |
+| `switch_tab` | `switchTab` | `switchTab` | `claude-vscode.editor.open(sessionId)` |
+| `close_tab` | `closeTab` | editor tab close | — (unsupported) |
+| `approve` / `reject` | `chatApproval` | selector from the approval registry | click the live permission control in the webview DOM |
+| `approve_all` | `approveAll` | composer CDP | — |
+| `stop_agent` | `stopTurn` | stop selector from extracted state | `session.interrupt()` behind the visible Stop |
+| `set_mode` | `setMode` | mode picker | — (menu not probed) |
+| `set_model`, `get_model_options` | `setModel` | model picker | — (menu not probed) |
+| `get_plan_model_options`, `set_plan_model` | `planModel` | plan widget picker | — |
+| `click_action` | `clickAction` | selector path from state | — |
+| `load_history` | `loadHistory` | storage DB, then scroll | — |
+| accept / reject diff | `editorDiff` | in-transcript | `claude-vscode.acceptProposedDiff` / `rejectProposedDiff` |
+
+### Adding a backend (e.g. Codex)
+
+1. Add the id to `ChatHostId` ([types.ts](../src/server/types.ts)) and `CHAT_HOST_IDS`.
+2. Implement `ChatHost`, usually by extending `BaseChatHost`. Declare
+   capabilities fail-closed, implement only probed operations, return the
+   tabs from `listTabs()` and the active tab's state from
+   `conversationView()`, and poll in `refresh()`.
+3. `hostRegistry.register(new CodexHost(...))` in [index.ts](../src/server/index.ts).
+
+The relay, the registry and the client need no changes. The tab chip and the
+header tint read `tab.host` / `activeHost`.
 
 ## 2. Two control surfaces, and why both
 

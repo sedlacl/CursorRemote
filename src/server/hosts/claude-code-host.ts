@@ -12,6 +12,7 @@ import {
   type ChatHostCapabilities,
   type ChatHostId,
   type ChatTabRef,
+  type HostConversationView,
 } from './chat-host.js';
 import { ClaudeWebviewClient } from './claude-webview-client.js';
 import { outcomeToTasks, readBackgroundTasks } from './claude-background-tasks.js';
@@ -150,14 +151,26 @@ export class ClaudeCodeHost extends BaseChatHost {
     sendMessage: true,
     newChat: true,
     switchTab: true,
+    // No probed close control for a Claude session tab.
+    closeTab: false,
     chatApproval: true,
+    approveAll: false,
     editorDiff: true,
     stopTurn: true,
     backgroundTasks: false,
     stopBackgroundTask: false,
     setMode: false,
     setModel: false,
+    planModel: false,
+    // The published state carries no Claude selector paths to click.
+    clickAction: false,
+    loadHistory: false,
+    subagents: false,
   };
+
+  override get label(): string {
+    return 'Claude Code';
+  }
 
   private readonly webview: ClaudeWebviewClient;
   private readonly bridge: ExtensionFileBridge;
@@ -219,6 +232,33 @@ export class ClaudeCodeHost extends BaseChatHost {
       messages: this.transcript,
       agentStatus: this.transcriptAgentStatus,
       model: this.transcriptModel,
+    };
+  }
+
+  /**
+   * The Claude session's conversation, applied over a neutral base while a
+   * Claude tab is active — nothing the Cursor extractor read about the
+   * composer beside it (mode, questionnaire, stop selector, …) survives.
+   *
+   * Mode is left empty: the permission-mode pill exists, but its menu is not
+   * probed, so it is neither read nor offered (`setMode: false`).
+   */
+  override conversationView(): HostConversationView {
+    const overlay = this.transcriptOverlay();
+    const agentStatus = overlay?.agentStatus ?? 'idle';
+    const running = agentStatus === 'generating';
+    return {
+      composerId: overlay?.composerId,
+      messages: overlay?.messages ?? [],
+      model: { current: overlay?.model || 'Claude', currentId: 'claude' },
+      agentStatus,
+      agentActivityLive: running,
+      // The header Stop follows the Claude turn; `stop_agent` routes to stopTurn().
+      agentStopAvailable: running,
+      agentStopSelectorPath: running ? 'claude:stop' : '',
+      agentStopSource: running ? 'composer' : 'none',
+      inputAvailable: true,
+      composerInputAvailable: true,
     };
   }
 

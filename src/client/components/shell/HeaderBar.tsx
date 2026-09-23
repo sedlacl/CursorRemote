@@ -5,6 +5,7 @@ import { useCommandClient } from '../../state/commandClient.js';
 import type { HealthSnapshot } from '../../state/serverHealth.js';
 import { useUiState } from '../../state/uiState.js';
 import { getConnectionUiState } from '../../view-models/connectionState.js';
+import { activeHostOf } from '../../view-models/hostCapabilities.js';
 import { buildStopButtonState } from '../../view-models/stopState.js';
 import { StopAgentButton } from './StopAgentButton.js';
 
@@ -117,12 +118,12 @@ export function HeaderBar({
     : '';
   const approvalCountLabel = globalApprovals.length > 1 ? ` (${globalApprovals.length})` : '';
 
-  // Tinted header when the active chat lives in the Claude Code panel — same
-  // layout, different tone, so it is obvious which agent a command will reach.
-  const activeHost = state.chatTabs.find(tab => tab.isActive)?.host ?? 'cursor';
+  // Tinted header (`header--<host>`) when the active chat is not Cursor's —
+  // same layout, different tone, so it is obvious which agent a command will reach.
+  const activeHost = activeHostOf(state);
 
   return (
-    <header id="header" className={activeHost === 'claude-code' ? 'header--claude' : undefined}>
+    <header id="header" className={activeHost !== 'cursor' ? `header--${activeHost}` : undefined}>
       <div className="header-left">
         <span id="connection-dot" className={`dot ${connection.status}`} />
         <span id="connection-text">{connection.label}</span>

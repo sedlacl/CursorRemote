@@ -13,13 +13,10 @@ import type { StateManager } from './state-manager.js';
 import type { CommandExecutor } from './command-executor.js';
 import { ChatHostRegistry } from './hosts/chat-host-registry.js';
 import { CursorHost } from './hosts/cursor-host.js';
-import type { ChatHost } from './hosts/chat-host.js';
+import { unsupported, type ChatHost, type ChatHostCapabilities } from './hosts/chat-host.js';
 import type { CDPBridge } from './cdp-bridge.js';
 import type { WindowMonitor } from './window-monitor.js';
-import {
-  resolveApprovalActionSelector,
-  resolveApprovalTargetTab,
-} from './approval-registry.js';
+import { resolveApprovalTargetTab } from './approval-registry.js';
 import { CursorStorageHistory } from './cursor-storage-history.js';
 import type { ComposerStorageRelation } from './cursor-storage-history.js';
 import { markdownToWebHtml, readPlanFile } from './plan-files.js';
@@ -235,11 +232,12 @@ export class Relay {
     this.config = config;
     this.stateManager = stateManager;
     this.commandExecutor = commandExecutor;
+    this.storageHistory = new CursorStorageHistory(config.cursorStateDbPath);
     // Falls back to a Cursor-only registry so existing callers (and tests) that
     // construct a Relay without hosts keep today's behaviour exactly.
     this.hostRegistry = hostRegistry ?? (() => {
       const registry = new ChatHostRegistry();
-      registry.register(new CursorHost(commandExecutor, stateManager));
+      registry.register(new CursorHost(commandExecutor, stateManager, this.storageHistory));
       return registry;
     })();
     this.cdpBridge = cdpBridge;
@@ -269,7 +267,6 @@ export class Relay {
       issuesRoot: process.env.UI_REPORTS_DIR?.trim() || undefined,
       diagnosticId: SERVER_INSTANCE.diagnosticId,
     });
-    this.storageHistory = new CursorStorageHistory(config.cursorStateDbPath);
     this.sessionStore = createWebappSessionStore(config.dataDir);
     const resolvedClient = resolveClientDir(getServerModuleDir());
     this.clientDir = resolvedClient.clientDir;
@@ -443,23 +440,81 @@ export class Relay {
     return undefined;
   }
 
-  /**
-   * Host that owns a tab-less command (`new_chat`, `stop`) — the one behind the
-   * currently active chat tab.
-   */
-  private activeHost(): ChatHost {
-    const tabs = this.stateManager.getCurrentState().chatTabs;
-    return this.hostRegistry.forActiveTab(tabs)
-      ?? this.hostRegistry.get('cursor')!;
-  }
-
-  /** Host that owns a specific tab, by composer id. */
+  /** Host that owns a specific tab, by composer id; the active host without one. */
   private hostForComposer(composerId: string | undefined): ChatHost {
-    if (!composerId) return this.activeHost();
+    if (!composerId) return this.hostRegistry.activeHost();
     const tab = this.stateManager
       .getCurrentState()
       .chatTabs.find(t => t.composerId === composerId);
-    return this.hostRegistry.forTab(tab) ?? this.hostRegistry.get('cursor')!;
+    return this.hostRegistry.forTab(tab) ?? this.hostRegistry.primary();
+  }
+
+  /**
+   * Refusal for a command that acts on the conversation in view, or `null`
+   * when it may run. Two checks, in this order:
+   *
+   *  1. the client issued it while showing the host that is still active
+   *     (`payload.activeHost`) — otherwise a tap on one backend's tab would
+   *     land in another backend's composer;
+   *  2. that host declares the capability.
+   */
+  private refuseOnActiveHost(
+    payload: CommandPayload,
+    capability: keyof ChatHostCapabilities,
+    operation: string,
+  ): CommandResult | null {
+    const mismatch = this.hostRegistry.checkActiveHost(payload.activeHost);
+    if (mismatch) return { commandId: payload.commandId, ok: false, error: mismatch };
+    const host = this.hostRegistry.activeHost();
+    if (!host.capabilities[capability]) return unsupported(payload.commandId, host.id, operation);
+    return null;
+  }
+
+  /**
+   * Run a command on the active host — or on `target`, for commands routed by
+   * the tab they name — after the checks above. The relay never calls a
+   * backend executor for a chat command; it always goes through here.
+   */
+  private async runOnHost(
+    payload: CommandPayload,
+    capability: keyof ChatHostCapabilities,
+    operation: string,
+    run: (host: ChatHost) => Promise<CommandResult>,
+    target?: ChatHost,
+  ): Promise<CommandResult> {
+    const host = target ?? this.hostRegistry.activeHost();
+    const refusal = target
+      ? (host.capabilities[capability] ? null : unsupported(payload.commandId, host.id, operation))
+      : this.refuseOnActiveHost(payload, capability, operation);
+    if (refusal) {
+      console.log(`[relay] ${operation} refused on ${host.id}: ${refusal.error}`);
+      return refusal;
+    }
+    return run(host);
+  }
+
+  /**
+   * Refusal for a workflow built on the primary host's extracted state —
+   * subagents, return-to-parent, transcript links. They read Cursor's
+   * conversation registry and selector paths, so they only run while the
+   * primary host's tab is in view.
+   */
+  private refuseUnlessPrimary(payload: CommandPayload, operation: string): CommandResult | null {
+    const mismatch = this.hostRegistry.checkActiveHost(payload.activeHost);
+    if (mismatch) return { commandId: payload.commandId, ok: false, error: mismatch };
+    const active = this.hostRegistry.activeHost();
+    if (active.id !== this.hostRegistry.primary().id) {
+      return unsupported(payload.commandId, active.id, operation);
+    }
+    return null;
+  }
+
+  /** Emit a refusal and report whether one was emitted. */
+  private emitRefusal(socket: Socket, refusal: CommandResult | null): boolean {
+    if (!refusal) return false;
+    console.log(`[relay] refused: ${refusal.error}`);
+    socket.emit('command:result', refusal);
+    return true;
   }
 
   private buildDiagnostics(): ServerDiagnostics {
@@ -1082,11 +1137,8 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: send_message from ${socket.id}`);
-        const result = await this.activeHost().sendMessage(
-          payload.commandId,
-          text || undefined,
-          attachments
-        );
+        const result = await this.runOnHost(payload, 'sendMessage', 'send_message', host =>
+          host.sendMessage(payload.commandId, text || undefined, attachments));
         if (result.ok) {
           this.requestFreshExtractionBurst();
         }
@@ -1102,65 +1154,11 @@ export class Relay {
           } satisfies CommandResult);
           return;
         }
-        const countBefore = this.stateManager.getCurrentState().messages.length;
-        const currentState = this.stateManager.getCurrentState();
-        const composerId = payload.composerId || currentState.activeComposerId;
         const times = Math.min(Math.max(payload.times ?? 2, 1), 8);
         console.log(`[relay] Command: load_history (${times}x) from ${socket.id}`);
-
-        if (composerId) {
-          try {
-            const stored = await this.storageHistory.loadComposerHistory(composerId);
-            if (stored && stored.loadedBubbles > 0) {
-              const merged = this.stateManager.mergeStoredHistory(stored.messages);
-              console.log(
-                `[relay] load_history storage: composer=${composerId.slice(0, 8)} ` +
-                `headers=${stored.totalHeaders} loaded=${stored.loadedBubbles} added=${merged.addedCount}`
-              );
-              socket.emit('command:result', {
-                commandId: payload.commandId,
-                ok: true,
-                data: {
-                  addedCount: merged.addedCount,
-                  totalCount: merged.totalCount,
-                  source: 'cursor_storage',
-                  loadedBubbles: stored.loadedBubbles,
-                  totalHeaders: stored.totalHeaders,
-                },
-              } satisfies CommandResult);
-              return;
-            }
-          } catch (err) {
-            console.warn(
-              `[relay] load_history storage fallback: ${err instanceof Error ? err.message : String(err)}`
-            );
-          }
-        }
-
-        const genBefore = this.stateManager.generation;
-
-        const scrollResult = await this.commandExecutor.scrollChatUp(payload.commandId, times);
-        if (!scrollResult.ok) {
-          socket.emit('command:result', scrollResult);
-          return;
-        }
-
-        await waitForFreshExtraction(this.stateManager, genBefore, 6000);
-        const countAfterScroll = this.stateManager.getCurrentState().messages.length;
-
-        // Return Cursor to the live tail with a single scrollTop jump (no wheel burst).
-        const bottomGen = this.stateManager.generation;
-        const bottomId = `${payload.commandId}-bottom`;
-        await this.commandExecutor.scrollChatToBottom(bottomId);
-        await waitForFreshExtraction(this.stateManager, bottomGen, 3000);
-
-        const totalCount = this.stateManager.getCurrentState().messages.length;
-        const addedCount = Math.max(0, countAfterScroll - countBefore);
-        socket.emit('command:result', {
-          commandId: payload.commandId,
-          ok: true,
-          data: { addedCount, totalCount },
-        } satisfies CommandResult);
+        const result = await this.runOnHost(payload, 'loadHistory', 'load_history', host =>
+          host.loadHistory({ commandId: payload.commandId, composerId: payload.composerId, times }));
+        socket.emit('command:result', result);
       });
 
       socket.on('command:approve', async (payload: CommandPayload) => {
@@ -1172,31 +1170,15 @@ export class Relay {
           } satisfies CommandResult);
           return;
         }
-        const host = this.activeHost();
-        const selectorPath = payload.selectorPath
-          ?? (payload.approvalId
-            ? resolveApprovalActionSelector(
-              this.stateManager.getApprovalRegistry(),
-              payload.approvalId,
-              payload.actionType === 'approve_all' ? 'approve_all' : 'approve',
-            )
-            : undefined);
-        // Only Cursor identifies an approval by a selector path resolved from
-        // the extracted registry; Claude finds the live prompt in its own DOM.
-        if (!selectorPath && host.id === 'cursor') {
-          socket.emit('command:result', {
-            commandId: payload.commandId,
-            ok: false,
-            error: 'Approval action no longer available',
-          } satisfies CommandResult);
-          return;
-        }
         console.log(`[relay] Command: approve from ${socket.id}`);
-        const result = await host.approve({
+        // The host resolves the approval: Cursor from its extracted registry,
+        // Claude from the live prompt in its webview.
+        const result = await this.runOnHost(payload, 'chatApproval', 'approve', host => host.approve({
           commandId: payload.commandId,
           approvalId: payload.approvalId,
-          selectorPath,
-        });
+          selectorPath: payload.selectorPath,
+          action: payload.actionType === 'approve_all' ? 'approve_all' : 'approve',
+        }));
         socket.emit('command:result', result);
       });
 
@@ -1210,7 +1192,8 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: approve_all from ${socket.id}`);
-        const result = await this.commandExecutor.approveAll(payload.commandId);
+        const result = await this.runOnHost(payload, 'approveAll', 'approve_all', host =>
+          host.approveAll(payload.commandId));
         socket.emit('command:result', result);
       });
 
@@ -1223,29 +1206,13 @@ export class Relay {
           } satisfies CommandResult);
           return;
         }
-        const host = this.activeHost();
-        const selectorPath = payload.selectorPath
-          ?? (payload.approvalId
-            ? resolveApprovalActionSelector(
-              this.stateManager.getApprovalRegistry(),
-              payload.approvalId,
-              'reject',
-            )
-            : undefined);
-        if (!selectorPath && host.id === 'cursor') {
-          socket.emit('command:result', {
-            commandId: payload.commandId,
-            ok: false,
-            error: 'Approval action no longer available',
-          } satisfies CommandResult);
-          return;
-        }
         console.log(`[relay] Command: reject from ${socket.id}`);
-        const result = await host.reject({
+        const result = await this.runOnHost(payload, 'chatApproval', 'reject', host => host.reject({
           commandId: payload.commandId,
           approvalId: payload.approvalId,
-          selectorPath,
-        });
+          selectorPath: payload.selectorPath,
+          action: 'reject',
+        }));
         socket.emit('command:result', result);
       });
 
@@ -1259,16 +1226,20 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: switch_tab to "${payload.tabTitle ?? payload.composerId ?? payload.selectorPath}" from ${socket.id}`);
+        // Routed by the target tab, not the active host: switching is how the
+        // user changes host, so the `activeHost` check does not apply.
         const tabHost = this.hostForComposer(payload.composerId);
-        const result = await tabHost.switchTab(payload.commandId, {
-          composerId: payload.composerId ?? '',
-          title: payload.tabTitle ?? '',
-          selectorPath: payload.selectorPath,
-          source: payload.tabSource,
-        });
+        const result = await this.runOnHost(payload, 'switchTab', 'switch_tab', host =>
+          host.switchTab(payload.commandId, {
+            composerId: payload.composerId ?? '',
+            title: payload.tabTitle ?? '',
+            selectorPath: payload.selectorPath,
+            source: payload.tabSource,
+          }), tabHost);
         if (result.ok) {
-          // Tab-less commands (new_chat, stop) follow the tab the user is on.
+          // Host-routed commands and the published conversation follow it.
           this.hostRegistry.setActiveHost(tabHost.id);
+          this.requestFreshExtraction();
         }
         socket.emit('command:result', result);
       });
@@ -1282,6 +1253,7 @@ export class Relay {
           } satisfies CommandResult);
           return;
         }
+        if (this.emitRefusal(socket, this.refuseUnlessPrimary(payload, 'open_transcript_link'))) return;
         const target = payload.composerId ?? payload.linkHref ?? 'unknown';
         console.log(`[relay] Command: open_transcript_link to "${target}" from ${socket.id}`);
         const scopeBefore = this.stateManager.historyScopeKey();
@@ -1314,12 +1286,12 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: close_tab "${payload.tabTitle ?? payload.composerId}" from ${socket.id}`);
-        const result = await this.commandExecutor.closeTab(
-          payload.commandId,
-          payload.tabTitle ?? '',
-          payload.composerId,
-          payload.tabSource
-        );
+        const result = await this.runOnHost(payload, 'closeTab', 'close_tab', host =>
+          host.closeTab(payload.commandId, {
+            composerId: payload.composerId ?? '',
+            title: payload.tabTitle ?? '',
+            source: payload.tabSource,
+          }), this.hostForComposer(payload.composerId));
         socket.emit('command:result', result);
       });
 
@@ -1334,7 +1306,8 @@ export class Relay {
         }
         console.log(`[relay] Command: new_chat from ${socket.id}`);
         // A new session belongs to the host of the tab the user is looking at.
-        const result = await this.activeHost().newChat(payload.commandId);
+        const result = await this.runOnHost(payload, 'newChat', 'new_chat', host =>
+          host.newChat(payload.commandId));
         socket.emit('command:result', result);
       });
 
@@ -1348,10 +1321,9 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: set_mode to ${payload.modeId} from ${socket.id}`);
-        const result = await this.commandExecutor.setMode(
-          payload.commandId,
-          payload.modeId
-        );
+        const modeId = payload.modeId;
+        const result = await this.runOnHost(payload, 'setMode', 'set_mode', host =>
+          host.setMode(payload.commandId, modeId));
         socket.emit('command:result', result);
       });
 
@@ -1365,10 +1337,9 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: set_model to ${payload.modelId} from ${socket.id}`);
-        const result = await this.commandExecutor.setModel(
-          payload.commandId,
-          payload.modelId
-        );
+        const modelId = payload.modelId;
+        const result = await this.runOnHost(payload, 'setModel', 'set_model', host =>
+          host.setModel(payload.commandId, modelId));
         socket.emit('command:result', result);
       });
 
@@ -1382,9 +1353,8 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: get_model_options from ${socket.id}`);
-        const result = await this.commandExecutor.getModelOptions(
-          payload.commandId
-        );
+        const result = await this.runOnHost(payload, 'setModel', 'get_model_options', host =>
+          host.getModelOptions(payload.commandId));
         socket.emit('command:result', result);
       });
 
@@ -1454,10 +1424,9 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: get_plan_model_options from ${socket.id}`);
-        const result = await this.commandExecutor.getPlanModelOptions(
-          payload.commandId,
-          payload.selectorPath
-        );
+        const selectorPath = payload.selectorPath;
+        const result = await this.runOnHost(payload, 'planModel', 'get_plan_model_options', host =>
+          host.getPlanModelOptions(payload.commandId, selectorPath));
         socket.emit('command:result', result);
       });
 
@@ -1471,11 +1440,9 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: set_plan_model to ${payload.planModelId} from ${socket.id}`);
-        const result = await this.commandExecutor.setPlanModel(
-          payload.commandId,
-          payload.selectorPath,
-          payload.planModelId
-        );
+        const { selectorPath, planModelId } = payload;
+        const result = await this.runOnHost(payload, 'planModel', 'set_plan_model', host =>
+          host.setPlanModel(payload.commandId, selectorPath, planModelId));
         socket.emit('command:result', result);
       });
 
@@ -1489,10 +1456,9 @@ export class Relay {
           return;
         }
         console.log(`[relay] Command: click_action from ${socket.id}`);
-        const result = await this.commandExecutor.clickAction(
-          payload.commandId,
-          payload.selectorPath
-        );
+        const selectorPath = payload.selectorPath;
+        const result = await this.runOnHost(payload, 'clickAction', 'click_action', host =>
+          host.clickAction(payload.commandId, selectorPath));
         if (result.ok) {
           this.requestFreshExtractionBurst();
         }
@@ -1511,7 +1477,8 @@ export class Relay {
         console.log(`[relay] Command: stop_agent from ${socket.id}`);
         // Stops the main turn only — a background task is stopped by its own
         // row, and `/tasks` is never opened from the relay.
-        const result = await this.activeHost().stopTurn(payload.commandId);
+        const result = await this.runOnHost(payload, 'stopTurn', 'stop', host =>
+          host.stopTurn(payload.commandId));
         if (result.ok) {
           this.requestFreshExtractionBurst();
         }
@@ -1527,6 +1494,7 @@ export class Relay {
           } satisfies CommandResult);
           return;
         }
+        if (this.emitRefusal(socket, this.refuseUnlessPrimary(payload, 'open_subagent'))) return;
         const resolved = resolveSubagentAction(this.stateManager.getCurrentState(), payload.subagentId);
         const validationError = validateOpenSubagent(resolved);
         if (validationError) {
@@ -1595,6 +1563,7 @@ export class Relay {
           return;
         }
 
+        if (this.emitRefusal(socket, this.refuseUnlessPrimary(payload, 'return_to_parent'))) return;
         const state = this.stateManager.getCurrentState();
         const childComposerId = payload.composerId?.trim() || state.activeComposerId;
         const windowId = state.activeWindowId;
@@ -1655,17 +1624,17 @@ export class Relay {
             } satisfies CommandResult);
             return;
           }
-          const tabResult = await this.commandExecutor.switchTab(
-            payload.commandId,
-            tab.tabTitle,
-            undefined,
-            target.parentComposerId,
-            tab.tabSource,
-          );
+          const primary = this.hostRegistry.primary();
+          const tabResult = await primary.switchTab(payload.commandId, {
+            composerId: target.parentComposerId,
+            title: tab.tabTitle,
+            source: tab.tabSource,
+          });
           if (!tabResult.ok) {
             socket.emit('command:result', tabResult);
             return;
           }
+          this.hostRegistry.setActiveHost(primary.id);
 
           await waitForHistoryScopeChange(this.stateManager, scopeBefore, 4000);
           this.requestFreshExtractionBurst();
@@ -1698,6 +1667,7 @@ export class Relay {
           } satisfies CommandResult);
           return;
         }
+        if (this.emitRefusal(socket, this.refuseUnlessPrimary(payload, 'stop_subagent'))) return;
         const resolved = resolveSubagentAction(this.stateManager.getCurrentState(), payload.subagentId);
         const validationError = validateStopSubagent(resolved);
         if (validationError) {
@@ -1856,18 +1826,21 @@ export class Relay {
             return;
           }
 
+          // The global approval registry is built from the primary host's
+          // window snapshots, so its target is always one of that host's tabs —
+          // and landing there makes it the active host again.
           const scopeBefore = this.stateManager.historyScopeKey();
-          const tabResult = await this.commandExecutor.switchTab(
-            payload.commandId,
-            tab.tabTitle,
-            undefined,
-            target.composerId,
-            tab.tabSource,
-          );
+          const primary = this.hostRegistry.primary();
+          const tabResult = await primary.switchTab(payload.commandId, {
+            composerId: target.composerId,
+            title: tab.tabTitle,
+            source: tab.tabSource,
+          });
           if (!tabResult.ok) {
             socket.emit('command:result', tabResult);
             return;
           }
+          this.hostRegistry.setActiveHost(primary.id);
           await waitForHistoryScopeChange(this.stateManager, scopeBefore, 4000);
           this.requestFreshExtraction();
           socket.emit('command:result', { commandId: payload.commandId, ok: true });

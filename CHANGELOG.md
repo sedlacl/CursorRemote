@@ -12,8 +12,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **New Claude chat opens in the primary editor**: while a Claude Code tab is active, **+** runs Claude Code: Open in Primary Editor. It no longer follows the side-panel preference.
+- **Commands always reach the backend of the tab on screen**: every chat command, including mode, model, plan model, approve all, close tab, history and control clicks, is now routed to the host that owns the active tab and checked against what that host supports. The web client stamps each command with the backend it was issued from, and the server refuses it if the active tab changed in the meantime, instead of running it on another backend. This also prepares the relay for further backends beside Cursor and Claude Code.
 
 ### Fixed
+- **Mode on a Claude tab no longer changes the Cursor composer**: a Claude tab showed Cursor's mode pill, so choosing Plan switched the Cursor composer next to it, for example one running Codex. Claude tabs now hide the mode pill and the model picker until those Claude menus are supported. Cursor's questionnaire, queue, subagents and stop control no longer appear on a Claude tab either.
+- **Jumping to an approval or a parent chat returns to Cursor**: after **Needs approval** or **Back to parent** opened a Cursor chat from a Claude tab, later commands still went to Claude. They now follow the Cursor tab.
 - **Claude user messages are no longer doubled**: a user row included its screen-reader heading (`You: …`) plus the same text again, so the bubble showed the message twice. The heading is dropped.
 - **Claude Stop interrupts the turn**: the header showed Generating, but Stop only synthesized a DOM click, which never reached Claude's interrupt handler. Stop now calls that handler, and clears a turn that stays stuck on Stop after the connection is gone.
 - **Claude model pill shows the Claude model**: an active Claude tab no longer keeps the Cursor composer model, such as Grok, in the pill.
