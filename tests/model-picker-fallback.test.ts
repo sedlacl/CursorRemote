@@ -163,13 +163,15 @@ describe('MODEL_ITEM_COLLECTOR_JS', () => {
     if (sel === 'button') return el.tagName === 'BUTTON';
     if (sel === '[id]') return !!el.id;
     if (sel === '[data-testid]') return el.attrs['data-testid'] !== undefined;
+    // Must run before the compound-attribute shortcut: `:not([hidden])` also
+    // contains two `[...]` groups.
+    if (sel.endsWith(':not([hidden])')) {
+      return matches(el, sel.replace(/:not\(\[hidden\]\)$/, '')) && !el.attrs.hidden;
+    }
     // Compound attribute selectors: [role="menu"][data-state="open"]
     if (sel.includes('[') && sel.indexOf('[') !== sel.lastIndexOf('[')) {
       const parts = sel.match(/\[[^\]]+\]/g) || [];
       return parts.every((part) => matches(el, part));
-    }
-    if (sel.endsWith(':not([hidden])')) {
-      return matches(el, sel.replace(/:not\(\[hidden\]\)$/, '')) && !el.attrs.hidden;
     }
     const m = sel.match(/^\[([a-z-]+)="([^"]+)"\]$/);
     if (m) return el.attrs[m[1]] === m[2];
@@ -458,6 +460,51 @@ describe('MODEL_ITEM_COLLECTOR_JS', () => {
         `pickModelById should resolve "${id}"`,
       );
     }
+  });
+
+  // Probed 2026-09-23: root menu has no section titles. Submenu rows are
+  // Context / Effort / Model, and the catalog is a sibling menu. The first
+  // submenu is Context (256K), which must not be opened.
+  it('opens the Model submenu when Context and Effort are listed first', () => {
+    const fixtureHtml = `
+      <div>
+        <div id="root-menu" role="menu">
+          <div role="menuitemcheckbox" class="ui-menu__toggle-row"><span>Fast</span></div>
+          <div id="context-trigger" role="menuitem" class="ui-menu__submenu-trigger" aria-haspopup="menu"><span>Context256K</span></div>
+          <div id="effort-trigger" role="menuitem" class="ui-menu__submenu-trigger" aria-haspopup="menu"><span>EffortHigh</span></div>
+          <div id="model-trigger" role="menuitem" class="ui-menu__submenu-trigger" aria-haspopup="menu"><span>ModelGrok 4.7</span></div>
+        </div>
+        <div id="model-catalog" role="menu">
+          <div role="menuitem"><span>Auto</span></div>
+          <div role="menuitem"><span>Grok 4.7</span></div>
+          <div role="menuitem"><span>Composer 2.5</span></div>
+          <div role="menuitem"><span>Add Models</span></div>
+          <div role="menuitem"><span>256K</span></div>
+        </div>
+      </div>
+    `;
+    const { fakeDoc, allEls } = setupSandbox(fixtureHtml);
+    const code = `
+      ${MODEL_ITEM_COLLECTOR_JS}
+      const root = document.getElementById('root-menu');
+      const opened = openModelSubmenu(root);
+      const menu = findModelItemsMenu(root);
+      const items = collectModelItems(menu);
+      ({ opened, menuId: menu && menu.id, labels: items.map((i) => i.label) })
+    `;
+    const result = vm.runInNewContext(code, { document: fakeDoc, Array }) as {
+      opened: boolean;
+      menuId: string;
+      labels: string[];
+    };
+    const clicks = (id: string) => allEls.find((el) => el.id === id)?.clicks.count ?? 0;
+    assert.equal(result.opened, true);
+    assert.equal(clicks('model-trigger'), 1);
+    assert.equal(clicks('context-trigger'), 0);
+    assert.equal(clicks('effort-trigger'), 0);
+    assert.equal(result.menuId, 'model-catalog');
+    const labels = JSON.parse(JSON.stringify(result.labels.slice().sort())) as string[];
+    assert.deepEqual(labels, ['Auto', 'Composer 2.5', 'Grok 4.7']);
   });
 });
 

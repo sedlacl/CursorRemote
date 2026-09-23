@@ -12,7 +12,15 @@ function resolveCursorCli(): string {
   return process.platform === 'win32' ? 'cursor.cmd' : 'cursor';
 }
 
+/** Cursor installs into the default profile unless `--profile` is given. */
+function resolveProfile(argv: string[]): string | null {
+  const idx = argv.indexOf('--profile');
+  if (idx >= 0 && argv[idx + 1]?.trim()) return argv[idx + 1].trim();
+  return process.env.CURSOR_PROFILE?.trim() || null;
+}
+
 function main(): void {
+  const profile = resolveProfile(process.argv.slice(2));
   const pkg = JSON.parse(readFileSync(PKG_PATH, 'utf-8')) as { version: string };
   const devVersion = devPackageVersion(pkg.version);
   const vsixPath = resolve(RELEASES_DIR, `cursor-remote-dev-${versionForFilename(devVersion)}.vsix`);
@@ -24,8 +32,9 @@ function main(): void {
   }
 
   const cursor = resolveCursorCli();
-  console.log(`\n[cursor-install] Installing ${vsixPath}`);
-  execSync(`${cursor} --install-extension ${JSON.stringify(vsixPath)} --force`, {
+  const profileArg = profile ? ` --profile ${JSON.stringify(profile)}` : '';
+  console.log(`\n[cursor-install] Installing ${vsixPath}${profile ? ` into profile "${profile}"` : ' into the default profile'}`);
+  execSync(`${cursor} --install-extension ${JSON.stringify(vsixPath)} --force${profileArg}`, {
     cwd: ROOT,
     stdio: 'inherit',
     shell: process.platform === 'win32',

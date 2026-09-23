@@ -43,7 +43,7 @@ async function main() {
   const triggerReport = await client.evaluate(`
     (() => {
       const out = {};
-      for (const sel of ['.ui-model-picker__trigger', '.composer-unified-dropdown-model']) {
+      for (const sel of ['.vscode-model-picker__trigger', '.ui-model-picker__trigger', '.composer-unified-dropdown-model']) {
         const els = document.querySelectorAll(sel);
         out[sel] = {
           count: els.length,
@@ -61,7 +61,7 @@ async function main() {
   // Step 2: click the first matching trigger.
   const clicked = await client.evaluate(`
     (() => {
-      for (const sel of ['.ui-model-picker__trigger', '.composer-unified-dropdown-model']) {
+      for (const sel of ['.vscode-model-picker__trigger', '.ui-model-picker__trigger', '.composer-unified-dropdown-model']) {
         const el = document.querySelector(sel);
         if (el) { el.click(); return sel; }
       }
@@ -81,7 +81,7 @@ async function main() {
       const out = {};
       out.byTestId = !!document.querySelector('[data-testid="model-picker-menu"]');
       const trigger = document.querySelector(
-        '.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"]'
+        '.vscode-model-picker__trigger[aria-expanded="true"],.ui-model-picker__trigger[aria-expanded="true"],.composer-unified-dropdown-model[aria-expanded="true"]'
       );
       out.ariaControls = trigger ? trigger.getAttribute('aria-controls') : null;
       out.menuByControls = (() => {
@@ -112,7 +112,77 @@ async function main() {
   console.log('\n--- Menu after click ---');
   console.log(JSON.stringify(menuReport, null, 2));
 
+  const structure = await client.evaluate(`
+    (() => {
+      const menus = Array.from(document.querySelectorAll('[role="menu"], [role="listbox"], [data-radix-menu-content], .ui-menu'));
+      return menus.slice(0, 6).map((m) => {
+        const rect = m.getBoundingClientRect();
+        const sections = Array.from(m.querySelectorAll('.ui-menu__section, [role="group"]')).slice(0, 8).map((sec) => ({
+          cls: String(sec.className || '').slice(0, 80),
+          title: ((sec.querySelector('.ui-menu__section-title, [class*="section-title"]') || {}).textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 40),
+        }));
+        const rows = Array.from(m.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [aria-haspopup]')).slice(0, 24).map((it) => ({
+          role: it.getAttribute('role'),
+          popup: it.getAttribute('aria-haspopup'),
+          expanded: it.getAttribute('aria-expanded'),
+          controls: it.getAttribute('aria-controls'),
+          cls: String(it.className || '').split(/\\s+/).slice(0, 4).join(' '),
+          text: (it.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 60),
+        }));
+        return {
+          role: m.getAttribute('role'),
+          state: m.getAttribute('data-state'),
+          id: m.id || '',
+          w: Math.round(rect.width),
+          h: Math.round(rect.height),
+          sections,
+          rows,
+        };
+      });
+    })()
+  `);
+  console.log('\n--- Menu structure ---');
+  console.log(JSON.stringify(structure, null, 2));
+
+  const submenu = await client.evaluate(`
+    (() => {
+      const menu = document.querySelector('[role="menu"]');
+      if (!menu) return { error: 'no menu' };
+      const triggers = Array.from(menu.querySelectorAll('.ui-menu__submenu-trigger, [aria-haspopup="menu"]'));
+      const model = triggers.find((t) => /^model/i.test((t.textContent || '').replace(/\\s+/g, '')));
+      if (!model) return { error: 'no model trigger', count: triggers.length };
+      (model.querySelector('.composer-unified-context-menu-item') || model).click();
+      return { clicked: (model.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80) };
+    })()
+  `);
+  console.log('\n--- Opened model submenu ---');
+  console.log(JSON.stringify(submenu, null, 2));
+  await new Promise((r) => setTimeout(r, 400));
+  const catalog = await client.evaluate(`
+    (() => {
+      const menus = Array.from(document.querySelectorAll('[role="menu"]')).filter((m) => {
+        const r = m.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      return menus.map((m) => ({
+        id: m.id || '',
+        h: Math.round(m.getBoundingClientRect().height),
+        rows: Array.from(m.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')).slice(0, 30).map((it) => ({
+          role: it.getAttribute('role'),
+          popup: it.getAttribute('aria-haspopup'),
+          checked: it.getAttribute('aria-checked'),
+          cls: String(it.className || '').split(/\\s+/).filter((c) => c.startsWith('ui-menu') || c.includes('selected') || c.includes('checked')).join(' '),
+          text: (it.innerText || it.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 70),
+        })),
+      }));
+    })()
+  `);
+  console.log('\n--- Visible menus after Model click ---');
+  console.log(JSON.stringify(catalog, null, 2));
+
   // Step 4: close the menu.
+  await client.pressKey('Escape', 'Escape', 27);
+  await new Promise((r) => setTimeout(r, 100));
   await client.pressKey('Escape', 'Escape', 27);
 
   await client.disconnect();

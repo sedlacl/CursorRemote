@@ -1,6 +1,11 @@
 import { randomUUID } from 'crypto';
 import type { ExtensionFileBridge } from '../extension-file-bridge.js';
-import type { BackgroundTask, ChatTab, CommandResult, MessageAttachment } from '../types.js';
+import type { AgentStatus, BackgroundTask, ChatElement, ChatTab, CommandResult, MessageAttachment } from '../types.js';
+import {
+  claudeRowsToMessages,
+  claudeTranscriptStatus,
+  type ClaudeTranscriptRead,
+} from './claude-transcript.js';
 import {
   BaseChatHost,
   type ChatApprovalRequest,
@@ -25,12 +30,84 @@ const DISCOVERY_THROTTLE_MS = 15_000;
 const SEL = {
   input: '[role="textbox"][aria-label="Message input"]',
   send: '[aria-label="Send message"]',
-  newSession: '[aria-label="New session"]',
   sessionRow: '[id^="sessions-list-row-"]',
 } as const;
 
 /** `sessions-list-row-<uuid>` → `<uuid>` */
 const SESSION_ROW_ID_PREFIX = 'sessions-list-row-';
+
+/** Retry an empty Session history read. A successful read is kept until the open surfaces change. */
+const HISTORY_RETRY_MS = 20_000;
+
+/** Header title and the model pill, shared by the connected chat and the other surface. */
+const SURFACE_META_JS = `(d) => {
+  const anchor = d.querySelector('[aria-label="New session"]');
+  let title = '';
+  if (anchor) {
+    const anchorY = anchor.getBoundingClientRect().y;
+    const chrome = ['Session history', 'New session'];
+    const titled = Array.from(d.querySelectorAll('button, [role="button"]'))
+      .map(el => {
+        const r = el.getBoundingClientRect();
+        const label = (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '').trim();
+        return { label: label, y: r.y, w: r.width };
+      })
+      .filter(c => c.label && c.w > 0 && Math.abs(c.y - anchorY) <= 2)
+      .find(c => chrome.indexOf(c.label) === -1);
+    title = titled ? titled.label : '';
+  }
+  const modelBtn = Array.from(d.querySelectorAll('button, [role="button"]')).find(el =>
+    /opus|sonnet|haiku|switch model/i.test(((el.getAttribute('aria-label') || '') + ' ' + (el.innerText || '')))
+  );
+  const model = modelBtn ? (modelBtn.innerText || '').replace(/\\s+/g, ' ').trim() : '';
+  return { title: title.slice(0, 80), model: model.slice(0, 80) };
+}`;
+
+/** Visible Stop button → the session object its React tree closes over. */
+const CLAUDE_SESSION_OF_STOP_JS = `
+  function sessionOf(stop) {
+    const fiberKey = Object.keys(stop).find((k) => k.startsWith('__reactFiber'));
+    let fiber = fiberKey ? stop[fiberKey] : null;
+    for (let i = 0; i < 20 && fiber; i++) {
+      const props = fiber.memoizedProps;
+      if (props && props.session && typeof props.session.interrupt === 'function') return props.session;
+      fiber = fiber.return;
+    }
+    return null;
+  }
+  function findStop(d) {
+    return Array.from(d.querySelectorAll('button, [role="button"]')).reverse().find((el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      return /^stop$/i.test((el.getAttribute('aria-label') || '').trim());
+    }) || null;
+  }
+`;
+
+const CLAUDE_STOP_JS = `(d) => {
+  ${CLAUDE_SESSION_OF_STOP_JS}
+  const stop = findStop(d);
+  if (!stop) return { ok: false };
+  const session = sessionOf(stop);
+  if (session) {
+    session.interrupt();
+    return { ok: true };
+  }
+  stop.click();
+  return { ok: true };
+}`;
+
+const CLAUDE_END_STUCK_TURN_JS = `(d) => {
+  ${CLAUDE_SESSION_OF_STOP_JS}
+  const stop = findStop(d);
+  if (!stop) return false;
+  const session = sessionOf(stop);
+  if (session && session.busy && session.busy.value && typeof session.endTurn === 'function') {
+    session.endTurn();
+    return true;
+  }
+  return false;
+}`;
 
 /**
  * Tab id scheme. The two prefixes must stay distinct: a webview name is also a
@@ -39,12 +116,7 @@ const SESSION_ROW_ID_PREFIX = 'sessions-list-row-';
  */
 const SESSION_TAB_PREFIX = 'claude:session:';
 const PANEL_TAB_PREFIX = 'claude:panel:';
-
-/**
- * Chat header chrome, verified on 2.1.278: the header row holds the session
- * title followed by these two controls. The title is whatever is not chrome.
- */
-const HEADER_CHROME_LABELS = ['Session history', 'New session'];
+const HISTORY_TAB_PREFIX = 'claude:history:';
 
 /**
  * The `anthropic.claude-code` panel as a {@link ChatHost}.
@@ -92,7 +164,16 @@ export class ClaudeCodeHost extends BaseChatHost {
   private readonly claudeVersion: string | null;
   private tabs: ChatTab[] = [];
   private backgroundTasks: BackgroundTask[] = [];
+  private transcript: ChatElement[] = [];
+  private transcriptAgentStatus: AgentStatus = 'idle';
+  /** Model pill of the connected surface, e.g. "Opus 5 (1M) Medium". */
+  private transcriptModel = '';
   private lastDiscoveryAt = 0;
+  private lastSurfaceScanAt = 0;
+  private lastHistoryAt = 0;
+  private historySurfaceKey = '';
+  private historyCache: ChatTab[] = [];
+  private surfaceMeta = new Map<string, { title: string; model: string; at: number }>();
 
   constructor(options: {
     cdpUrl: string;
@@ -119,6 +200,29 @@ export class ClaudeCodeHost extends BaseChatHost {
   }
 
   /**
+   * Last transcript read from the visible Claude chat.
+   *
+   * `composerId` is the tab the panel is showing this transcript under, so the
+   * relay can drop the Cursor composer id while that tab is active.
+   */
+  transcriptOverlay(): {
+    composerId: string;
+    messages: ChatElement[];
+    agentStatus: AgentStatus;
+    model: string;
+  } | null {
+    const tab = this.tabs.find(item => item.isActive && item.source === 'open')
+      ?? this.tabs.find(item => item.source === 'open');
+    if (!tab) return null;
+    return {
+      composerId: tab.composerId,
+      messages: this.transcript,
+      agentStatus: this.transcriptAgentStatus,
+      model: this.transcriptModel,
+    };
+  }
+
+  /**
    * Attach to an open Claude panel, if there is one. Safe to call repeatedly.
    *
    * Discovery sweeps CDP targets, so while no panel is open it is throttled —
@@ -142,6 +246,9 @@ export class ClaudeCodeHost extends BaseChatHost {
     if (!connected) {
       this.tabs = [];
       this.backgroundTasks = [];
+      this.transcript = [];
+      this.transcriptAgentStatus = 'idle';
+      this.transcriptModel = '';
     }
     return connected;
   }
@@ -156,6 +263,12 @@ export class ClaudeCodeHost extends BaseChatHost {
     this.webview.disconnect();
     this.tabs = [];
     this.backgroundTasks = [];
+    this.transcript = [];
+    this.transcriptAgentStatus = 'idle';
+    this.transcriptModel = '';
+    this.historyCache = [];
+    this.historySurfaceKey = '';
+    this.surfaceMeta.clear();
   }
 
   /**
@@ -167,20 +280,68 @@ export class ClaudeCodeHost extends BaseChatHost {
   async refresh(): Promise<void> {
     if (!(await this.ensureConnected())) return;
 
+    const now = Date.now();
+    if (now - this.lastSurfaceScanAt >= DISCOVERY_THROTTLE_MS) {
+      this.lastSurfaceScanAt = now;
+      await this.webview.discover();
+    }
+
     this.tabs = await this.readTabs();
+    await this.readTranscript();
 
     const outcome = await readBackgroundTasks(this.webview, this.claudeVersion);
     this.backgroundTasks = outcomeToTasks(outcome);
     this.capabilities.backgroundTasks = outcome.status === 'ok';
   }
 
+  /**
+   * Visible chat transcript. CSS module classes are hashed per build, so this
+   * uses only `data-transcript-message` and `aria-label` (probed 2026-09-23).
+   */
+  private async readTranscript(): Promise<void> {
+    let raw: unknown;
+    try {
+      raw = await this.webview.evaluateInPanel(`(d) => {
+        const region = d.querySelector('[role="region"][aria-label="Claude Code conversation"]');
+        if (!region) return { running: false, items: [] };
+        const running = Array.from(d.querySelectorAll('button, [role="button"]')).some((el) => {
+          const label = (el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
+          return /\\b(stop|interrupt)\\b/i.test(label);
+        });
+        const nodes = Array.from(region.querySelectorAll('[data-transcript-message]')).slice(-60);
+        const items = nodes.map((el) => {
+          const clone = el.cloneNode(true);
+          // The row starts with an h3 screen-reader heading ("You: …") that
+          // repeats the visible message. Hashed visually-hidden classes are
+          // not stable; the heading tag is.
+          for (const b of Array.from(clone.querySelectorAll('button, [role="button"], h3'))) b.remove();
+          return {
+            aria: (el.getAttribute('aria-label') || '').trim(),
+            testid: el.getAttribute('data-testid') || '',
+            busy: el.getAttribute('aria-busy') === 'true',
+            text: (clone.innerText || clone.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 4000),
+          };
+        });
+        return { running, items };
+      }`);
+    } catch {
+      return;
+    }
+    if (!isTranscriptRead(raw)) return;
+    this.transcript = claudeRowsToMessages(raw.items);
+    this.transcriptAgentStatus = claudeTranscriptStatus(raw.running);
+  }
+
   /** Session rows from the session-list surface, when one is open. */
-  private async readSessionListTabs(): Promise<ChatTab[]> {
-    if (!(await this.webview.ensureSessionList())) return [];
+  private async readSessionRows(where: 'list' | 'chat'): Promise<{ id: string; title: string }[]> {
+    const evalFn = where === 'list'
+      ? this.webview.evaluateInSessionList.bind(this.webview)
+      : this.webview.evaluateInPanel.bind(this.webview);
+    if (where === 'list' && !(await this.webview.ensureSessionList())) return [];
 
     let raw: unknown;
     try {
-      raw = await this.webview.evaluateInSessionList(`(d) => {
+      raw = await evalFn(`(d) => {
         return Array.from(d.querySelectorAll(${JSON.stringify(SEL.sessionRow)}))
           .slice(0, 40)
           .map(el => ({
@@ -191,92 +352,168 @@ export class ClaudeCodeHost extends BaseChatHost {
     } catch {
       return [];
     }
-
     if (!Array.isArray(raw)) return [];
-    return raw
-      .map((row): ChatTab | null => toSessionTab(row as { id?: unknown; title?: unknown }))
-      .filter((tab): tab is ChatTab => tab !== null);
+    return raw.flatMap(row => {
+      if (typeof row !== 'object' || row === null) return [];
+      const id = (row as { id?: unknown }).id;
+      const title = (row as { title?: unknown }).title;
+      if (typeof id !== 'string' || !id) return [];
+      return [{ id, title: typeof title === 'string' ? title : '' }];
+    });
   }
 
   /**
-   * Claude sessions as chat tabs.
+   * Open surfaces (side panel and editor) plus session history.
    *
-   * Preferred source is the session-list surface: it renders one row per
-   * session carrying the real session id (`sessions-list-row-<uuid>`), which is
-   * exactly what `claude-vscode.editor.open` takes, so `switch_tab` can reach
-   * any of them. With no session list open, the chat view still yields the one
-   * session it is showing, titled from its header.
+   * Each chat webview is its own tab. History rows carry a session id when
+   * they have one; numeric popover rows are switched by clicking the row.
    */
   private async readTabs(): Promise<ChatTab[]> {
-    const fromList = await this.readSessionListTabs();
-    if (fromList.length > 0) return fromList;
-
-    let raw: unknown;
+    let surfaces: ChatTab[];
     try {
-      raw = await this.webview.evaluateInPanel(`(d) => {
-        const rows = Array.from(d.querySelectorAll(${JSON.stringify(SEL.sessionRow)}));
-        if (rows.length > 0) {
-          return {
-            kind: 'list',
-            sessions: rows.slice(0, 40).map(el => ({
-              id: el.id,
-              title: (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 80),
-            })),
-          };
-        }
-        const input = d.querySelector(${JSON.stringify(SEL.input)});
-        if (!input) return { kind: 'none' };
-
-        // Header row: session title, then fixed chrome. Take the first labelled
-        // control in that row that is not one of the known chrome buttons.
-        // Anchor on the header's fixed chrome rather than on a y-range: the
-        // transcript scrolls, so its buttons pass through any viewport band.
-        const anchor = d.querySelector(${JSON.stringify(SEL.newSession)});
-        if (!anchor) return { kind: 'chat', title: '' };
-        const anchorY = anchor.getBoundingClientRect().y;
-        const chrome = ${JSON.stringify(HEADER_CHROME_LABELS)};
-        const titled = Array.from(d.querySelectorAll('button, [role="button"]'))
-          .map(el => {
-            const r = el.getBoundingClientRect();
-            // The title control is labelled by its text; the chrome buttons
-            // beside it are icon-only and labelled by aria-label.
-            const label = (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '').trim();
-            return { label: label, y: r.y, w: r.width };
-          })
-          .filter(c => c.label && c.w > 0 && Math.abs(c.y - anchorY) <= 2)
-          .sort((a, b) => a.y - b.y)
-          .find(c => chrome.indexOf(c.label) === -1);
-        return { kind: 'chat', title: (titled ? titled.label : '').slice(0, 80) };
-      }`);
+      surfaces = await this.readSurfaceTabs();
     } catch {
-      // A panel that is mid-reload keeps its previous tabs rather than blinking
-      // out of the tab bar.
       return this.tabs;
     }
-
-    const target = this.webview.getTarget();
-    const panelId = `${PANEL_TAB_PREFIX}${target?.webviewName || target?.id || 'unknown'}`;
-
-    if (isListResult(raw)) {
-      return raw.sessions
-        .map((session): ChatTab | null => toSessionTab(session))
-        .filter((tab): tab is ChatTab => tab !== null);
+    const history = await this.readHistoryTabs(surfaces);
+    const tabs = [...surfaces, ...history];
+    if (tabs.length > 0 && !tabs.some(tab => tab.isActive)) {
+      const firstOpen = tabs.find(tab => tab.source === 'open');
+      if (firstOpen) firstOpen.isActive = true;
     }
+    return tabs;
+  }
 
-    if (isChatResult(raw)) {
-      return [{
-        composerId: panelId,
-        title: cleanSessionTitle(raw.title) || 'Claude Code',
-        isActive: false,
+  private chatTargets() {
+    const known = this.webview.getKnownTargets().filter(target => target.view === 'chat');
+    const current = this.webview.getTarget();
+    if (current?.view === 'chat' && !known.some(target => target.id === current.id)) {
+      return [current, ...known];
+    }
+    return known;
+  }
+
+  private async readSurfaceTabs(): Promise<ChatTab[]> {
+    const chats = this.chatTargets();
+    const both = chats.some(chat => claudePlacement(chat.purpose) === 'sidebar')
+      && chats.some(chat => claudePlacement(chat.purpose) === 'editor');
+    const connected = this.webview.getTarget();
+    const tabs: ChatTab[] = [];
+
+    for (const chat of chats) {
+      const placement = claudePlacement(chat.purpose);
+      const cached = this.surfaceMeta.get(chat.id);
+      const stale = !cached || Date.now() - cached.at > DISCOVERY_THROTTLE_MS;
+      const isConnected = connected?.id === chat.id;
+      if (isConnected || stale) {
+        const meta = await this.readSurfaceMeta(chat.wsUrl, isConnected);
+        if (meta) {
+          const previous = this.surfaceMeta.get(chat.id);
+          this.surfaceMeta.set(chat.id, {
+            title: meta.title || previous?.title || '',
+            model: meta.model || previous?.model || '',
+            at: Date.now(),
+          });
+        }
+      }
+      const meta = this.surfaceMeta.get(chat.id);
+      if (isConnected && meta?.model) this.transcriptModel = meta.model;
+      const base = cleanSessionTitle(meta?.title || '')
+        || (placement === 'sidebar' ? 'Claude panel' : 'Claude editor');
+      const title = both
+        ? `${base} · ${placement === 'sidebar' ? 'panel' : 'editor'}`
+        : base;
+      tabs.push({
+        composerId: claudePanelComposerId(placement, chat.webviewName || chat.id),
+        title,
+        isActive: isConnected,
         status: '',
         selectorPath: '',
         source: 'open',
         workStatus: 'idle',
         host: 'claude-code',
-      }];
+      });
+    }
+    return tabs;
+  }
+
+  private async readSurfaceMeta(
+    wsUrl: string,
+    connected: boolean,
+  ): Promise<{ title: string; model: string } | null> {
+    const raw = connected
+      ? await this.webview.evaluateInPanel(SURFACE_META_JS).catch(() => null)
+      : await this.webview.probeInner(wsUrl, SURFACE_META_JS);
+    return parseSurfaceMeta(raw);
+  }
+
+  private async readHistoryTabs(surfaces: ChatTab[]): Promise<ChatTab[]> {
+    const fromManager = (await this.readSessionRows('list'))
+      .map(row => toHistoryTab(row))
+      .filter((tab): tab is ChatTab => tab !== null);
+    const visible = (await this.readSessionRows('chat'))
+      .map(row => toHistoryTab(row))
+      .filter((tab): tab is ChatTab => tab !== null);
+
+    await this.refreshHistoryIfNeeded();
+
+    const byId = new Map<string, ChatTab>();
+    for (const tab of [...fromManager, ...this.historyCache, ...visible]) {
+      if (!byId.has(tab.composerId)) byId.set(tab.composerId, tab);
     }
 
-    return [];
+    const openTitles = new Set(
+      surfaces.map(tab => surfaceBaseTitle(tab.title).toLowerCase()),
+    );
+    return [...byId.values()].filter(tab => !openTitles.has(tab.title.trim().toLowerCase()));
+  }
+
+  /**
+   * Open Session history once per set of visible chats. Repeating it on the
+   * poll would toggle the popover in the IDE.
+   */
+  private async refreshHistoryIfNeeded(): Promise<void> {
+    const surfaceKey = this.chatTargets().map(chat => chat.id).sort().join('|');
+    const surfacesChanged = surfaceKey !== this.historySurfaceKey;
+    const retryEmpty = this.historyCache.length === 0 && Date.now() - this.lastHistoryAt >= HISTORY_RETRY_MS;
+    if (!surfacesChanged && !retryEmpty) return;
+    this.lastHistoryAt = Date.now();
+    this.historySurfaceKey = surfaceKey;
+    const popped = await this.snapshotHistoryPopover();
+    if (popped && popped.length > 0) this.historyCache = popped;
+  }
+
+  /**
+   * Session history is a popover. Open it, read the rows, then dismiss it.
+   * Rows already on screen are left alone.
+   */
+  private async snapshotHistoryPopover(): Promise<ChatTab[] | null> {
+    if (!this.webview.isConnected()) return null;
+    try {
+      const opened = await this.webview.evaluateInPanel(`(d) => {
+        if (d.querySelector(${JSON.stringify(SEL.sessionRow)})) return 'already';
+        const history = Array.from(d.querySelectorAll('button, [role="button"]'))
+          .find(el => (el.getAttribute('aria-label') || '') === 'Session history');
+        if (!history) return false;
+        history.click();
+        return true;
+      }`);
+      if (opened === false) return null;
+      if (opened === true) await delay(300);
+      const rows = await this.readSessionRows('chat');
+      if (opened === true) await this.dismissHistory();
+      return rows
+        .map(row => toHistoryTab(row))
+        .filter((tab): tab is ChatTab => tab !== null);
+    } catch {
+      return null;
+    }
+  }
+
+  private async dismissHistory(): Promise<void> {
+    const client = this.webview.getClient();
+    if (!client) return;
+    await client.pressKey('Escape', 'Escape', 27);
   }
 
   async sendMessage(
@@ -330,19 +567,36 @@ export class ClaudeCodeHost extends BaseChatHost {
   }
 
   async newChat(commandId: string): Promise<CommandResult> {
-    return this.runCommand(commandId, 'claude-vscode.newConversation', []);
+    // Open in Primary Editor. `newConversation` and `editor.open` follow the
+    // preferred location and can land in the side panel instead.
+    const known = new Set(
+      this.webview.getKnownTargets().filter(target => target.view === 'chat').map(target => target.id),
+    );
+    const result = await this.runCommand(commandId, 'claude-vscode.primaryEditor.open', []);
+    if (result.ok) await this.attachEditor(known);
+    return result;
   }
 
   async switchTab(commandId: string, tab: ChatTabRef): Promise<CommandResult> {
+    const panel = parseClaudePanelId(tab.composerId);
+    if (panel) return this.focusSurface(commandId, panel);
+
+    const historyIndex = parseHistoryIndex(tab.composerId);
+    if (historyIndex !== null) return this.openHistoryRow(commandId, historyIndex);
+
     const sessionId = parseSessionId(tab.composerId);
     if (!sessionId) {
-      // A panel-derived tab carries no session id; focusing the panel is the
-      // most that can honestly be done.
       return this.runCommand(commandId, 'claude-vscode.focus', []);
     }
 
-    // `editor.open(sessionId?, initialPrompt?, viewColumn?, _, fullEditor?, opts)`
-    // — initialPrompt stays null: it only prefills, it does not send.
+    // From the editor, force the primary editor. From the side panel, let
+    // `editor.open` follow the sidebar preference so the session stays there.
+    if (this.placementOfConnected() === 'editor') {
+      const result = await this.runCommand(commandId, 'claude-vscode.primaryEditor.open', [sessionId, null]);
+      if (result.ok) await this.attachPlacement('editor');
+      return result;
+    }
+
     const result = await this.runCommand(commandId, 'claude-vscode.editor.open', [
       sessionId,
       null,
@@ -351,11 +605,101 @@ export class ClaudeCodeHost extends BaseChatHost {
       null,
       { programmatic: true },
     ]);
-    if (result.ok) {
-      // The surface that just gained focus may be a different webview target.
-      await this.webview.connect();
-    }
+    if (result.ok) await this.attachPlacement('sidebar');
     return result;
+  }
+
+  private placementOfConnected(): ClaudePlacement {
+    const target = this.webview.getTarget();
+    return target ? claudePlacement(target.purpose) : 'sidebar';
+  }
+
+  private async focusSurface(
+    commandId: string,
+    panel: { placement: ClaudePlacement; webviewName: string },
+  ): Promise<CommandResult> {
+    await this.webview.discover();
+    const target = this.chatTargets().find(chat =>
+      claudePlacement(chat.purpose) === panel.placement
+      && (chat.webviewName === panel.webviewName || chat.id === panel.webviewName)
+    );
+    if (!target) {
+      return { commandId, ok: false, error: 'Claude surface is not open' };
+    }
+    const connected = await this.webview.connect(target);
+    if (!connected) {
+      return { commandId, ok: false, error: 'Claude surface is not connected' };
+    }
+    await this.readTranscript();
+    return { commandId, ok: true };
+  }
+
+  private async attachEditor(knownIds: Set<string>): Promise<void> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await delay(attempt === 0 ? 400 : 700);
+      await this.webview.discover();
+      const editors = this.chatTargets().filter(chat => claudePlacement(chat.purpose) === 'editor');
+      const created = editors.find(chat => !knownIds.has(chat.id));
+      const match = created ?? (attempt === 2 ? (editors.find(chat => chat.visible) ?? editors[0]) : undefined);
+      if (!match) continue;
+      await this.webview.connect(match);
+      await this.readTranscript();
+      return;
+    }
+  }
+
+  private async attachPlacement(placement: ClaudePlacement): Promise<void> {
+    await delay(400);
+    await this.webview.discover();
+    const chats = this.chatTargets().filter(chat => claudePlacement(chat.purpose) === placement);
+    const match = chats.find(chat => chat.visible) ?? chats[0];
+    if (!match) return;
+    await this.webview.connect(match);
+    await this.readTranscript();
+  }
+
+  private async openHistoryRow(commandId: string, rowKey: string): Promise<CommandResult> {
+    if (!(await this.ensureConnected())) {
+      return { commandId, ok: false, error: 'Claude Code panel is not connected' };
+    }
+    const rowId = `${SESSION_ROW_ID_PREFIX}${rowKey}`;
+    try {
+      const clicked = await this.webview.evaluateInPanel(`(d) => {
+        const rowId = ${JSON.stringify(rowId)};
+        const clickRow = () => {
+          const row = d.getElementById(rowId);
+          if (!row) return false;
+          row.click();
+          return true;
+        };
+        if (clickRow()) return 'clicked';
+        const history = Array.from(d.querySelectorAll('button, [role="button"]'))
+          .find(el => (el.getAttribute('aria-label') || '') === 'Session history');
+        if (history) history.click();
+        return clickRow() ? 'clicked' : 'opened';
+      }`);
+      if (clicked === 'opened') {
+        await delay(250);
+        const second = await this.webview.evaluateInPanel(`(d) => {
+          const row = d.getElementById(${JSON.stringify(rowId)});
+          if (!row) return false;
+          row.click();
+          return true;
+        }`);
+        await this.dismissHistory();
+        if (second !== true) {
+          return { commandId, ok: false, error: 'Session history row not found' };
+        }
+      } else if (clicked !== 'clicked') {
+        return { commandId, ok: false, error: 'Session history row not found' };
+      } else {
+        await this.dismissHistory();
+      }
+      await this.readTranscript();
+      return { commandId, ok: true };
+    } catch (err) {
+      return { commandId, ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   async approve(request: ChatApprovalRequest): Promise<CommandResult> {
@@ -371,25 +715,17 @@ export class ClaudeCodeHost extends BaseChatHost {
       return { commandId, ok: false, error: 'Claude Code panel is not connected' };
     }
 
-    // The Stop control replaces Send in the prompt box while a turn runs, so it
-    // exists only when there is something to stop. `/tasks` is never used.
+    // Stop is a submit button whose React onClick calls session.interrupt().
+    // A DOM click() does not run that handler. A dead webview connection also
+    // leaves busy set, so if interrupt does not clear it, end the turn locally.
     try {
-      const clicked = await this.webview.evaluateInPanel(`(d) => {
-        const controls = Array.from(d.querySelectorAll('button, [role="button"]'));
-        for (const el of controls) {
-          const rect = el.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) continue;
-          const label = ((el.getAttribute('aria-label') || '') + ' ' + (el.textContent || '')).toLowerCase();
-          if (/\\b(stop|interrupt)\\b/.test(label)) {
-            el.click();
-            return true;
-          }
-        }
-        return false;
-      }`);
-      return clicked === true
-        ? { commandId, ok: true }
-        : { commandId, ok: false, error: 'Stop control not visible — no turn is running' };
+      const clicked = await this.webview.evaluateInPanel(CLAUDE_STOP_JS);
+      if (!isStopClick(clicked) || !clicked.ok) {
+        return { commandId, ok: false, error: 'Stop control not visible — no turn is running' };
+      }
+      await delay(500);
+      await this.webview.evaluateInPanel(CLAUDE_END_STUCK_TURN_JS).catch(() => false);
+      return { commandId, ok: true };
     } catch (err) {
       return { commandId, ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -467,46 +803,84 @@ export class ClaudeCodeHost extends BaseChatHost {
   }
 }
 
-/** One `sessions-list-row-<uuid>` element as a chat tab, or null if malformed. */
-function toSessionTab(row: { id?: unknown; title?: unknown }): ChatTab | null {
-  const rawId = typeof row.id === 'string' ? row.id : '';
-  if (!rawId.startsWith(SESSION_ROW_ID_PREFIX)) return null;
-  const id = rawId.slice(SESSION_ROW_ID_PREFIX.length);
-  if (!id) return null;
+/**
+ * A history row. UUID ids become `claude:session:`; numeric popover ids
+ * (`sessions-list-row-0`) become `claude:history:` and are opened by a click.
+ */
+function toHistoryTab(row: { id: string; title: string }): ChatTab | null {
+  if (!row.id.startsWith(SESSION_ROW_ID_PREFIX)) return null;
+  const rest = row.id.slice(SESSION_ROW_ID_PREFIX.length);
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rest);
+  const index = /^\d+$/.test(rest);
+  if (!uuid && !index) return null;
 
   return {
-    composerId: `${SESSION_TAB_PREFIX}${id}`,
-    title: cleanSessionTitle(typeof row.title === 'string' ? row.title : '') || 'Claude session',
+    composerId: uuid ? `${SESSION_TAB_PREFIX}${rest}` : `${HISTORY_TAB_PREFIX}${rest}`,
+    title: cleanSessionTitle(row.title) || 'Claude session',
     isActive: false,
     status: '',
     selectorPath: '',
-    source: 'open',
+    source: 'sidebar',
     workStatus: 'idle',
     host: 'claude-code',
   };
 }
 
-interface ListResult {
-  kind: 'list';
-  sessions: { id: string; title: string }[];
+function parseSurfaceMeta(value: unknown): { title: string; model: string } | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const title = (value as { title?: unknown }).title;
+  const model = (value as { model?: unknown }).model;
+  return {
+    title: typeof title === 'string' ? title : '',
+    model: typeof model === 'string' ? model : '',
+  };
 }
 
-interface ChatResult {
-  kind: 'chat';
-  title: string;
+/** Drop the " · panel" / " · editor" suffix added when both surfaces are open. */
+function surfaceBaseTitle(title: string): string {
+  return title.replace(/ · (panel|editor)$/, '').trim();
 }
 
-function isListResult(value: unknown): value is ListResult {
+function isTranscriptRead(value: unknown): value is ClaudeTranscriptRead {
+  if (typeof value !== 'object' || value === null) return false;
+  const items = (value as ClaudeTranscriptRead).items;
+  return Array.isArray(items);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isStopClick(value: unknown): value is { ok: boolean } {
   return typeof value === 'object'
     && value !== null
-    && (value as ListResult).kind === 'list'
-    && Array.isArray((value as ListResult).sessions);
+    && typeof (value as { ok?: unknown }).ok === 'boolean';
 }
 
-function isChatResult(value: unknown): value is ChatResult {
-  return typeof value === 'object'
-    && value !== null
-    && (value as ChatResult).kind === 'chat';
+export type ClaudePlacement = 'sidebar' | 'editor';
+
+/** `webviewView` is the side panel. Anything else is an editor tab. */
+export function claudePlacement(purpose: string): ClaudePlacement {
+  return purpose === 'webviewView' ? 'sidebar' : 'editor';
+}
+
+export function claudePanelComposerId(placement: ClaudePlacement, webviewName: string): string {
+  return `${PANEL_TAB_PREFIX}${placement}:${webviewName}`;
+}
+
+export function parseClaudePanelId(
+  composerId: string,
+): { placement: ClaudePlacement; webviewName: string } | null {
+  const match = /^claude:panel:(sidebar|editor):(.+)$/.exec(composerId);
+  if (!match?.[2]) return null;
+  return { placement: match[1] as ClaudePlacement, webviewName: match[2] };
+}
+
+/** `claude:history:<n>` is a popover row with no session uuid. */
+export function parseHistoryIndex(composerId: string): string | null {
+  if (!composerId.startsWith(HISTORY_TAB_PREFIX)) return null;
+  const rest = composerId.slice(HISTORY_TAB_PREFIX.length);
+  return /^\d+$/.test(rest) ? rest : null;
 }
 
 /**

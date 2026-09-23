@@ -13,6 +13,9 @@ import { join } from 'path';
  */
 export const VSCODE_BRIDGE_COMMANDS = [
   'claude-vscode.editor.open',
+  // Forces a full editor panel. `editor.open` follows the preferred location
+  // and can land in the sidebar instead.
+  'claude-vscode.primaryEditor.open',
   'claude-vscode.newConversation',
   'claude-vscode.focus',
   'claude-vscode.focusLastMessage',

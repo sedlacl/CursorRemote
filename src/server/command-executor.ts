@@ -119,9 +119,14 @@ export const MODEL_ITEM_HELPERS_JS = `
     if (hasClass(el, 'ui-menu__submenu-trigger')) return true;
     if (isInNamedSection(el, 'Effort')) return true;
     if (isInNamedSection(el, 'Options')) return true;
+    if (isInNamedSection(el, 'Context')) return true;
     const label = labelOf(el);
     if (!label) return true;
-    if (/^(low|medium|high|fast|effort|options|model)$/i.test(label)) return true;
+    if (/^(low|medium|high|fast|effort|options|model|context)$/i.test(label)) return true;
+    if (/^add models$/i.test(label)) return true;
+    // Context window sizes (256K, 1M) are parameter rows, not models.
+    if (/^\\d+(\\.\\d+)?[km]$/i.test(label.replace(/\\s+/g, ''))) return true;
+    if (/^(context|effort)\\b/i.test(label)) return true;
     // Concatenated Effort section container label seen in live probes.
     if (/^effort(low)?(medium)?(high)?$/i.test(label.replace(/\\s+/g, ''))) return true;
     return false;
@@ -160,8 +165,10 @@ export const MODEL_ITEM_HELPERS_JS = `
     clickable.click();
   };
 
-  // Model catalog lives in a submenu on current Cursor builds
-  // (Effort / Options / Model sections). Flat menus have no submenu trigger.
+  // Model catalog lives in a submenu. Older builds put it under a section
+  // titled "Model". Current builds (probed 2026-09-23) have no section titles:
+  // the root menu is Fast + submenu rows Context / Effort / Model, and the
+  // catalog opens from the row whose label starts with "Model".
   const findModelSubmenuTrigger = (menu) => {
     if (!menu) return null;
     const sections = Array.from(menu.querySelectorAll('.ui-menu__section'));
@@ -170,7 +177,13 @@ export const MODEL_ITEM_HELPERS_JS = `
       const trigger = sec.querySelector('.ui-menu__submenu-trigger, [aria-haspopup="menu"]');
       if (trigger) return trigger;
     }
-    return menu.querySelector('.ui-menu__submenu-trigger');
+    const triggers = Array.from(menu.querySelectorAll('.ui-menu__submenu-trigger'));
+    const named = triggers.find((t) => /^model/i.test(labelOf(t).replace(/\\s+/g, '')));
+    if (named) return named;
+    // A lone submenu is the older catalog trigger. Several parameter rows
+    // (Context / Effort / Model) must not fall through to Context.
+    if (triggers.length === 1) return triggers[0];
+    return null;
   };
 
   const openModelSubmenu = (menu) => {

@@ -325,6 +325,24 @@ export class ClaudeWebviewClient {
   }
 
   /**
+   * One-shot evaluate against a Claude webview that is not the connected chat.
+   * Used to title the other open surface without stealing the live connection.
+   */
+  async probeInner(wsUrl: string, fn: string, timeoutMs = 8000): Promise<unknown> {
+    const probe = new CdpClient();
+    try {
+      await probe.connect(wsUrl, 4000);
+      const result = await probe.evaluate(inPanel(fn), timeoutMs);
+      if (isNoFrame(result)) return null;
+      return result;
+    } catch {
+      return null;
+    } finally {
+      probe.disconnect();
+    }
+  }
+
+  /**
    * Evaluate a `(d, w) => …` function body against the inner Claude frame.
    * Throws when no panel is connected or the inner frame is not mounted.
    */
@@ -348,11 +366,26 @@ export class ClaudeWebviewClient {
   }
 }
 
-/** Lower sorts first: visible chat, hidden chat, session list, anything else. */
+/**
+ * Lower sorts first.
+ *
+ * Both chats can be on screen at once. The side panel (`purpose=webviewView`)
+ * wins the initial connection; the editor stays in the list as its own tab.
+ */
+export function claudeTargetRank(target: { view: string; purpose: string; visible: boolean }): number {
+  if (target.view === 'chat') {
+    const sidebar = target.purpose === 'webviewView';
+    if (target.visible && sidebar) return 0;
+    if (target.visible) return 1;
+    if (sidebar) return 2;
+    return 3;
+  }
+  if (target.view === 'session-list') return target.visible ? 4 : 5;
+  return 6;
+}
+
 function targetRank(target: ClaudeWebviewTarget): number {
-  if (target.view === 'chat') return target.visible ? 0 : 1;
-  if (target.view === 'session-list') return target.visible ? 2 : 3;
-  return 4;
+  return claudeTargetRank(target);
 }
 
 function parseQueryParam(url: string, name: string): string {

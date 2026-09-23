@@ -8,6 +8,9 @@ import { appendLogLine, type UnifiedOutputChannel } from './output-channel.js';
 import { updateStatusBar, type HealthData, type ServerState } from './status-bar.js';
 import { migrateLegacyUiReports } from './ui-report-migration.js';
 import type { GitLocalStatusSummary } from './git-status-display.js';
+import { isCursorRemoteHealth } from '../../src/shared/relay-health.js';
+
+type PortProbe = 'relay' | 'foreign' | 'free';
 
 const HEALTH_POLL_INTERVAL_MS = 5000;
 const SHUTDOWN_TIMEOUT_MS = 3000;
@@ -133,17 +136,37 @@ export class ServerManager extends EventEmitter {
     return url.replace('/health', '/internal/git-snapshot');
   }
 
-  private async probeExistingServer(): Promise<boolean> {
+  private async probePort(): Promise<PortProbe> {
     const { url } = this.getHealthUrl();
+    let resp: Response;
     try {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(2000) });
-      if (resp.ok) {
-        const data = await resp.json() as HealthData;
-        this.lastHealth = data;
-        return true;
+      resp = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    } catch {
+      return 'free';
+    }
+    try {
+      const data: unknown = await resp.json();
+      if (resp.ok && isCursorRemoteHealth(data)) {
+        this.lastHealth = data as HealthData;
+        return 'relay';
       }
-    } catch { /* not running */ }
-    return false;
+    } catch { /* non-JSON answer */ }
+    return 'foreign';
+  }
+
+  private async probeExistingServer(): Promise<boolean> {
+    return (await this.probePort()) === 'relay';
+  }
+
+  private reportForeignPort(port: string): void {
+    const message = `CursorRemote: port ${port} is used by another application, so the relay server cannot start. Change cursorRemote.serverPort.`;
+    this.outputChannel.warn(`[${this.windowName}] ${message}`);
+    this.setState('error');
+    void vscode.window.showErrorMessage(message, 'Open Settings').then(choice => {
+      if (choice === 'Open Settings') {
+        void vscode.commands.executeCommand('workbench.action.openSettings', 'cursorRemote.serverPort');
+      }
+    });
   }
 
   async start(): Promise<void> {
@@ -185,8 +208,13 @@ export class ServerManager extends EventEmitter {
     }
 
     const { port, host } = this.getHealthUrl();
-    const alreadyRunning = await this.probeExistingServer();
-    if (alreadyRunning) {
+    const probe = await this.probePort();
+    if (probe === 'foreign') {
+      this._reactingToFlag = false;
+      this.reportForeignPort(port);
+      return;
+    }
+    if (probe === 'relay') {
       this._reactingToFlag = false;
       this.outputChannel.info(`[${this.windowName}] Server already running — attaching as observer.`);
       this._isOwner = false;
@@ -365,8 +393,12 @@ export class ServerManager extends EventEmitter {
 
   private async fallbackToObserver(): Promise<void> {
     const { port, host } = this.getHealthUrl();
-    const alive = await this.probeExistingServer();
-    if (alive) {
+    const probe = await this.probePort();
+    if (probe === 'foreign') {
+      this.reportForeignPort(port);
+      return;
+    }
+    if (probe === 'relay') {
       this._isOwner = false;
       this.setState(this.lastHealth?.connected ? 'running' : 'disconnected');
       this.startHealthPolling(port, host);
@@ -416,9 +448,10 @@ export class ServerManager extends EventEmitter {
     const poll = async () => {
       try {
         const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
-        if (resp.ok) {
+        const body: unknown = resp.ok ? await resp.json() : null;
+        if (isCursorRemoteHealth(body)) {
           failCount = 0;
-          const data = await resp.json() as HealthData;
+          const data = body as HealthData;
           this.lastHealth = data;
           const state: ServerState = data.connected ? 'running' : 'disconnected';
           this.setState(state);

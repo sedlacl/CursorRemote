@@ -8,8 +8,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **Ask to restart Cursor when CDP is off**: when the extension starts and remote debugging is not listening, it asks whether to restart Cursor with CDP. The prompt is on by default. Turn it off with **CursorRemote: Prompt Restart Without CDP** (`cursorRemote.promptRestartWithoutCdp`), or choose **Don't ask again** in the dialog. Restart still closes every Cursor window.
+- **Claude panel and editor are separate tabs**: when Claude Code is open in the side panel and in the editor at the same time, each is its own tab and shows that surface's model. Session history is listed beside them. Choosing a past session from the editor runs **Open in Primary Editor**.
+
+### Changed
+- **New Claude chat opens in the primary editor**: while a Claude Code tab is active, **+** runs Claude Code: Open in Primary Editor. It no longer follows the side-panel preference.
 
 ### Fixed
+- **Claude user messages are no longer doubled**: a user row included its screen-reader heading (`You: …`) plus the same text again, so the bubble showed the message twice. The heading is dropped.
+- **Claude Stop interrupts the turn**: the header showed Generating, but Stop only synthesized a DOM click, which never reached Claude's interrupt handler. Stop now calls that handler, and clears a turn that stays stuck on Stop after the connection is gone.
+- **Claude model pill shows the Claude model**: an active Claude tab no longer keeps the Cursor composer model, such as Grok, in the pill.
+- **Model list opens the model catalog**: the picker root is Context, Effort, and Model. The sheet was opening the first submenu, so it offered context sizes such as 256K instead of the models.
+- **Claude tab shows that session**: while a Claude Code tab is active, the panel transcript comes from the Claude webview. It no longer keeps the Cursor composer that is open beside it.
+- **Another app on the server port is no longer mistaken for the relay**: the extension checks that `/health` really comes from CursorRemote before attaching as an observer. When a different service holds `cursorRemote.serverPort`, it shows an error with a shortcut to change the port, instead of silently reporting a running server that never started.
 - **Settings filter matches the installed build**: the Setup panel shows and copies `@ext:<id>` of the extension that is actually running, so a local dev build (`cursor-remote-dev.cursor-remote`) no longer gets the marketplace filter that finds nothing.
 
 ## [0.4.5] - 2026-09-18

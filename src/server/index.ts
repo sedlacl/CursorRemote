@@ -15,7 +15,7 @@ import { TelegramTransport } from './transports/telegram/index.js';
 import { RawTelegramTransport } from './transports/telegram-raw/index.js';
 import { DomExportService } from './dom-export.js';
 import type { CdpFailure } from '../shared/cdp-status.js';
-import type { BackgroundTask, ChatTab } from './types.js';
+import type { BackgroundTask, ChatTab, CursorState } from './types.js';
 import { ChatHostRegistry } from './hosts/chat-host-registry.js';
 import { CursorHost } from './hosts/cursor-host.js';
 import { ClaudeCodeHost } from './hosts/claude-code-host.js';
@@ -105,6 +105,7 @@ async function main(): Promise<void> {
         // else — no second poller, and `/tasks` is never opened.
         state.chatTabs = mergeClaudeTabs(state.chatTabs);
         state.backgroundTasks = mergeClaudeBackgroundTasks(state.backgroundTasks);
+        applyClaudeTranscript(state);
         stateManager.onExtraction(state);
       } else {
         stateManager.onExtractionFailure(errorMessage ?? 'Extraction failed');
@@ -132,10 +133,13 @@ async function main(): Promise<void> {
     const claudeTabs = claudeHost.listTabs();
     if (claudeTabs.length === 0) return cursorTabs;
     const withHost = cursorTabs.map(tab => ({ ...tab, host: tab.host ?? 'cursor' as const }));
-    return hostRegistry.getActiveHost() === 'claude-code'
-      ? [...withHost.map(tab => ({ ...tab, isActive: false })),
-         ...claudeTabs.map((tab, i) => ({ ...tab, isActive: i === 0 }))]
-      : [...withHost, ...claudeTabs];
+    if (hostRegistry.getActiveHost() !== 'claude-code') {
+      return [...withHost, ...claudeTabs.map(tab => ({ ...tab, isActive: false }))];
+    }
+    const claude = claudeTabs.some(tab => tab.isActive)
+      ? claudeTabs
+      : claudeTabs.map((tab, index) => ({ ...tab, isActive: index === 0 }));
+    return [...withHost.map(tab => ({ ...tab, isActive: false })), ...claude];
   }
 
   /**
@@ -145,6 +149,34 @@ async function main(): Promise<void> {
   function mergeClaudeBackgroundTasks(cursorTasks: BackgroundTask[]): BackgroundTask[] {
     if (hostRegistry.getActiveHost() !== 'claude-code') return cursorTasks;
     return claudeHost.listBackgroundTasks();
+  }
+
+  /**
+   * While a Claude tab is active, the panel must show that session. The Cursor
+   * extractor keeps publishing the workbench composer; replace it with the last
+   * transcript read from the Claude webview.
+   */
+  function applyClaudeTranscript(state: CursorState): void {
+    if (hostRegistry.getActiveHost() !== 'claude-code') return;
+    const overlay = claudeHost.transcriptOverlay();
+    state.messages = overlay?.messages ?? [];
+    if (overlay?.composerId) state.activeComposerId = overlay.composerId;
+    state.model = {
+      current: overlay?.model || 'Claude',
+      currentId: 'claude',
+    };
+    state.agentStatus = overlay?.agentStatus ?? 'idle';
+    state.agentActivityText = null;
+    state.agentActivityLive = state.agentStatus === 'generating';
+    // The Cursor extractor's stop selector belongs to the composer beside this
+    // tab. The header Stop button follows the Claude turn instead.
+    const claudeRunning = state.agentStatus === 'generating';
+    state.agentStopAvailable = claudeRunning;
+    state.agentStopSelectorPath = claudeRunning ? 'claude:stop' : '';
+    state.agentStopSource = claudeRunning ? 'composer' : 'none';
+    state.pendingApprovals = [];
+    state.inputAvailable = true;
+    state.composerInputAvailable = true;
   }
 
   const claudeRefreshTimer = setInterval(() => {

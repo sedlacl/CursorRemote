@@ -18,7 +18,15 @@ import {
   VERIFIED_VERSIONS,
 } from '../src/server/hosts/claude-background-tasks.js';
 import { parseVersionFromFolder } from '../src/server/hosts/claude-version.js';
-import { cleanSessionTitle, parseSessionId } from '../src/server/hosts/claude-code-host.js';
+import {
+  claudePanelComposerId,
+  claudePlacement,
+  cleanSessionTitle,
+  parseClaudePanelId,
+  parseHistoryIndex,
+  parseSessionId,
+} from '../src/server/hosts/claude-code-host.js';
+import { claudeTargetRank } from '../src/server/hosts/claude-webview-client.js';
 import type { ChatHostId, ChatTab, CommandResult } from '../src/server/types.js';
 
 function tab(overrides: Partial<ChatTab> & { composerId: string }): ChatTab {
@@ -214,6 +222,28 @@ describe('Claude tab ids', () => {
 
   it('rejects a session id that is not a UUID', () => {
     assert.equal(parseSessionId('claude:session:not-a-uuid'), null);
+  });
+
+  it('tells a side panel from an editor and does not treat either as a session id', () => {
+    const name = '832E90F7';
+    assert.equal(claudePlacement('webviewView'), 'sidebar');
+    assert.equal(claudePlacement(''), 'editor');
+    const sidebarId = claudePanelComposerId('sidebar', name);
+    const editorId = claudePanelComposerId('editor', name);
+    assert.deepEqual(parseClaudePanelId(sidebarId), { placement: 'sidebar', webviewName: name });
+    assert.deepEqual(parseClaudePanelId(editorId), { placement: 'editor', webviewName: name });
+    assert.equal(parseSessionId(sidebarId), null);
+    assert.equal(parseClaudePanelId(`claude:panel:${name}`), null);
+    assert.equal(parseHistoryIndex('claude:history:2'), '2');
+    assert.equal(parseHistoryIndex('claude:history:abc'), null);
+  });
+
+  it('prefers a visible side panel over a visible editor when both are open', () => {
+    const sidebar = claudeTargetRank({ view: 'chat', purpose: 'webviewView', visible: true });
+    const editor = claudeTargetRank({ view: 'chat', purpose: '', visible: true });
+    const list = claudeTargetRank({ view: 'session-list', purpose: 'webviewView', visible: true });
+    assert.ok(sidebar < editor);
+    assert.ok(editor < list);
   });
 
   it('strips the relative timestamp a session row renders inline', () => {

@@ -7,6 +7,7 @@ import {
   upsertArgvRemoteDebuggingPort,
 } from '../src/shared/cdp-status.js';
 import { shouldOfferCdpRestart } from '../src/shared/cdp-restart-prompt.js';
+import { isCursorRemoteHealth } from '../src/shared/relay-health.js';
 import {
   argvJsonPathFromGlobalStorage,
   resolveCursorExecutablePath,
@@ -133,6 +134,14 @@ describe('CDP restart prompt', () => {
       cdpListening: false,
       alreadyClaimedThisLaunch: true,
     }), false);
+  });
+});
+
+describe('relay health identity', () => {
+  it('accepts the relay payload and rejects another service on the port', () => {
+    assert.equal(isCursorRemoteHealth({ ok: true, connected: false, cdpUrl: 'http://127.0.0.1:19222' }), true);
+    assert.equal(isCursorRemoteHealth({ status: 'ok', service: 'unifi-network-mcp' }), false);
+    assert.equal(isCursorRemoteHealth(null), false);
   });
 });
 
