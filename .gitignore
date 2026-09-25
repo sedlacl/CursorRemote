@@ -1,5 +1,7 @@
 node_modules/
-.claude/
+.claude/*
+!.claude/skills/
+!.claude/agents/
 dist/
 *.js.map
 .env
